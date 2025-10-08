@@ -1,0 +1,28 @@
+[project]
+name = "git-quilt"
+version = "0.0.1"
+description = "git based patch manager"
+authors = [
+    {name = "Lawrence D'Anna",email = "larry@elder-gods.org"}
+]
+license = {text = "Apache-2.0"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+]
+
+[tool.poetry]
+packages = [
+    { include = "git_quilt", from = 'src'},
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "mypy (>=1.18.2,<2.0.0)",
+    "black (>=25.9.0,<26.0.0)",
+    "flake8 (>=7.3.0,<8.0.0)"
+]
