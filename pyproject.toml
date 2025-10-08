@@ -16,6 +16,9 @@ packages = [
     { include = "git_quilt", from = 'src'},
 ]
 
+[project.scripts]
+git-swap = "git_quilt.git_swap:main"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
