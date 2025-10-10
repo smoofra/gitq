@@ -121,3 +121,71 @@ def test_swap_root(repo: Git):
     assert repo.t(f"git diff {sha} HEAD")
     assert repo.log() == ["x", "a"]
     assert all("temp" not in branch for branch in repo.branches())
+
+
+def test_resume(repo: Git):
+
+    repo.w(
+        "a",
+        """
+            aaa
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w(
+        "a",
+        """
+            aaa
+            bbb
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    assert repo.log() == ["0", "a", "b"]
+    sha = repo.rev_parse("HEAD")
+    repo.s("! git swap --edit")
+    repo.w(
+        "a",
+        """
+            bbb
+        """,
+    )
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["0", "b", "a"]
+
+
+def test_resume_root(repo: Git):
+
+    repo.w(
+        "a",
+        """
+            aaa
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q --amend -m a")
+    repo.w(
+        "a",
+        """
+            aaa
+            bbb
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    assert repo.log() == ["a", "b"]
+    sha = repo.rev_parse("HEAD")
+    repo.s("! git swap --edit")
+    repo.w(
+        "a",
+        """
+            bbb
+        """,
+    )
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["b", "a"]
