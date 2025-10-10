@@ -203,3 +203,36 @@ def test_keep_going(repo: Git):
     repo.s("git swap --keep-going")
     assert repo.t(f"git diff {sha} HEAD")
     assert "".join(repo.log()) == "0abBcdefg"
+
+
+def test_middle(repo: Git):
+    for c in "abcdefg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap :/e")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "0abcedfg"
+
+
+def test_middle_keep_going(repo: Git):
+
+    for c in "abcdefg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    repo.w("b", "BBBBBB")
+    repo.s("git add .")
+    repo.s("git commit -q -m B")
+
+    for c in "hij":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --keep-going :/B")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "0abBcdefghij"
