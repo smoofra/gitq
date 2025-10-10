@@ -9,7 +9,7 @@ from textwrap import dedent
 from itertools import count
 
 from .continuations import Continuation, Suspend, Stop, Squash
-from .git import Git, UserError, GitFailed, FNULL, MergeFound
+from .git import Git, UserError, GitFailed, MergeFound
 
 T = TypeVar("T")
 
@@ -78,26 +78,9 @@ class PickCherryWithReference(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        ok = False
-        try:
-            try:
-                self.git.cmd(["git", "cherry-pick", self.cherry], stderr=FNULL)
-                ok = True
-            except GitFailed:
-                if self.git.conflicted:
-                    self.git.cmd(["git", "checkout", self.reference, "."])
-                    self.git.cmd(["git", "cherry-pick", "--continue"])
-                    ok = True
-                else:
-                    raise
-        finally:
-            if not ok:
-                self.git.cmd(["git", "cherry-pick", "--abort"])
-            elif not self.git.cmd_test(["git", "diff", "--quiet", "HEAD", self.reference]):
-                # cherry pick succeeded, but resulted in a different tree.  Fix it.
-                self.git.cmd(["git", "read-tree", self.reference])
-                self.git.cmd(["git", "commit", "--allow-empty", "--amend", "-C", "HEAD"])
-                self.git.cmd(["git", "checkout", "-f", "HEAD"])
+        self.git.cmd(["git", "read-tree", self.reference])
+        self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", self.cherry])
+        self.git.cmd(["git", "reset", "--hard", "HEAD"])
 
 
 # When resuming, check if the user ran `git cherry-pick --continue`, and do it for
@@ -191,7 +174,10 @@ class KeepGoing(Continuation):
         except (SwapFailed, Stop):
             return
         A = self.git.commit("HEAD")
-        B = self.git.unique_parent(A)
+        try:
+            B = self.git.unique_parent(A)
+        except MergeFound:
+            return
         self.git.checkout(B.sha)
         with PickCherries(self.git, cherries=[A.sha]):
             with KeepGoing(self.git, edit=self.edit, baselines=self.baselines):
@@ -236,7 +222,7 @@ def collect_cherries(commit: Optional[str], *, git: Git) -> Iterator[None]:
 # raised.
 def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
     try:
-        git.cmd(["git", "cherry-pick", ref])
+        git.cmd(["git", "cherry-pick", "--allow-empty", ref])
     except GitFailed:
         if edit and git.conflicted:
             with CherryPickContinue(git):

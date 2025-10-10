@@ -123,6 +123,19 @@ def test_swap_root(repo: Git):
     assert all("temp" not in branch for branch in repo.branches())
 
 
+def test_swap_empty(repo: Git):
+    repo.w("a", "a")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "a0"
+    repo.s("git swap")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "0a"
+
+
 def test_resume(repo: Git):
 
     repo.w(
@@ -236,3 +249,43 @@ def test_middle_keep_going(repo: Git):
     repo.s("git swap --keep-going :/B")
     assert repo.t(f"git diff {sha} HEAD")
     assert "".join(repo.log()) == "0abBcdefghij"
+
+
+def test_keep_going_root(repo: Git):
+    repo.w("a", "a")
+    repo.s("git add .")
+    repo.s("git commit -q --amend -m a")
+
+    repo.w("b", "b")
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --keep-going")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "ba"
+
+
+def test_keep_going_root_longer(repo: Git):
+    for c in "abcd":
+        repo.w(c, c)
+        repo.s("git add .")
+        if c == "a":
+            repo.s("git commit -q --amend -m a")
+        else:
+            repo.s(f"git commit -q -m {c}")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --keep-going")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "dabc"
+
+
+def test_keep_going_root_longer_empty(repo: Git):
+    for c in "abcd":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --keep-going")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "d0abc"
