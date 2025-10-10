@@ -1,7 +1,8 @@
 import os
 import subprocess
 import shlex
-from typing import List, Set
+import re
+from typing import List, Set, Iterator
 
 FNULL = open(os.devnull, "w")
 
@@ -140,3 +141,18 @@ class Git:
         if len(commit.parents) != 1:
             raise MergeFound(f"{commit} is a merge")
         return self.commit(commit.parents[0])
+
+    def branches(self) -> Iterator[str]:
+        for line in self.cmd(["git", "for-each-ref", "refs/heads"], quiet=True).splitlines():
+            m = re.search(r"\trefs/heads/(.*?)\s*$", line)
+            assert m
+            yield m.group(1)
+
+    def branch_exists(self, branch: str) -> bool:
+        return self.cmd_test(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", "--"], stdout=FNULL
+        )
+
+    def ls_files(self) -> Iterator[str]:
+        for line in self.cmd(["git", "ls-files"], quiet=True).splitlines():
+            yield line.rstrip()

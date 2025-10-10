@@ -87,8 +87,37 @@ def test_swap(repo: Git):
     )
     repo.s("git add .")
     repo.s("git commit -q -m x")
-    assert repo.log() == ["init", "a", "x"]
+    assert repo.log() == ["0", "a", "x"]
     sha = repo.rev_parse("HEAD")
     repo.s("git swap")
     assert repo.t(f"git diff {sha} HEAD")
-    assert repo.log() == ["init", "x", "a"]
+    assert repo.log() == ["0", "x", "a"]
+
+
+def test_swap_root(repo: Git):
+    repo.w(
+        "a",
+        """
+            aaa
+            bbb
+            ccc
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q --amend -m a")
+    repo.w(
+        "x",
+        """
+            xxx
+            yyy
+            zzz
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q -m x")
+    sha = repo.rev_parse("HEAD")
+    assert repo.log() == ["a", "x"]
+    repo.s("git swap")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["x", "a"]
+    assert all("temp" not in branch for branch in repo.branches())
