@@ -9,16 +9,12 @@ from textwrap import dedent
 from itertools import count
 
 from .continuations import Continuation, Suspend, Stop, Squash
-from .git import Git, UserError, GitFailed, FNULL
+from .git import Git, UserError, GitFailed, FNULL, MergeFound
 
 T = TypeVar("T")
 
 
 class SwapFailed(Exception):
-    pass
-
-
-class MergeFound(Exception):
     pass
 
 

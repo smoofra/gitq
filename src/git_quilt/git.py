@@ -11,10 +11,6 @@ class GitFailed(Exception):
     pass
 
 
-class SwapFailed(Exception):
-    pass
-
-
 class MergeFound(Exception):
     pass
 
