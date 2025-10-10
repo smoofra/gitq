@@ -1,10 +1,10 @@
 
 MAX_LINE = 99
-SOURCES = src
+SOURCES = src test
 
-.PHONY: install check flake8 black black-check mypy
+.PHONY: install check flake8 black black-check mypy test
 
-check: flake8 black-check mypy
+check: flake8 black-check mypy test
 	@ echo ✅
 
 install:
@@ -21,4 +21,7 @@ black: install
 
 mypy: install
 	poetry run mypy $(SOURCES)
+
+test: install
+	poetry run pytest
 
