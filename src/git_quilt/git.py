@@ -122,7 +122,7 @@ class Git:
             return set()
         branch = branch.removeprefix("refs/heads/")
         try:
-            baseline = self.cmd(["git", "config", f"branch.{branch}.baseline"]).strip()
+            baseline = self.cmd(["git", "config", f"branch.{branch}.baseline"], quiet=True).strip()
         except GitFailed:
             return set()
         return {self.rev_parse(baseline)}
