@@ -189,3 +189,17 @@ def test_resume_root(repo: Git):
     repo.s("git swap --continue")
     assert repo.t(f"git diff {sha} HEAD")
     assert repo.log() == ["b", "a"]
+
+
+def test_keep_going(repo: Git):
+    for c in "abcdefg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+    repo.w("b", "BBBBBB")
+    repo.s("git add .")
+    repo.s("git commit -q -m B")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --keep-going")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "0abBcdefg"
