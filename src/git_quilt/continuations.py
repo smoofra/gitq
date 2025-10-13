@@ -3,6 +3,7 @@ import sys
 import json
 from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator
 from contextlib import contextmanager
+from itertools import count
 
 from .git import Git, UserError
 
@@ -170,3 +171,58 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         del j["git"]
         del j["manager"]
         return j
+
+
+class DeleteTempBranch(Continuation):
+
+    def __init__(self, git: Git, branch: str, previous_head: str):
+        super().__init__(git)
+        self.branch = branch
+        self.previous_head = previous_head
+
+    @contextmanager
+    def impl(self) -> Iterator[None]:
+        try:
+            yield
+        finally:
+            if self.git.on_orphan_branch():
+                print(f"# reset back to before creating {self.branch} branch")
+                self.git.force_checkout(self.previous_head)
+            else:
+                self.git.detach()
+            if self.git.branch_exists(self.branch):
+                self.git.cmd(["git", "branch", "-qD", self.branch])
+
+
+@contextmanager
+def TempBranch(git: Git) -> Iterator[str]:
+    """
+    Create a temporary branch with no content and no parents.
+    """
+
+    branches = set(git.branches())
+    for n in count():
+        branch = f"temp-{n}"
+        if branch not in branches:
+            break
+    else:
+        raise AssertionError
+
+    with DeleteTempBranch(git=git, branch=branch, previous_head=git.head()):
+        git.cmd(["git", "checkout", "-q", "--orphan", branch])
+        git.delete_index_and_files()
+        yield branch
+
+
+@contextmanager
+def CheckoutBaseline(git: Git, sha: str | None):
+    """
+    Checkout a baseline commit, or if argument is None, create a temporary
+    branch with no history and check that out.
+    """
+    if sha is None:
+        with TempBranch(git):
+            yield
+    else:
+        git.checkout(sha)
+        yield

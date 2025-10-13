@@ -146,17 +146,44 @@ class Git:
             raise MergeFound(f"{commit} is a merge")
         return self.commit(commit.parents[0])
 
+    def unique_parent_or_root(self, commit: Commit) -> Commit | None:
+        if len(commit.parents) == 0:
+            return None
+        else:
+            return self.unique_parent(commit)
+
     def branches(self) -> Iterator[str]:
         for line in self.cmd(["git", "for-each-ref", "refs/heads"], quiet=True).splitlines():
             m = re.search(r"\trefs/heads/(.*?)\s*$", line)
             assert m
             yield m.group(1)
 
+    def ref_exists(self, ref: str) -> bool:
+        return self.cmd_test(["git", "rev-parse", "--verify", "--quiet", ref, "--"])
+
     def branch_exists(self, branch: str) -> bool:
-        return self.cmd_test(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", "--"], stdout=FNULL
-        )
+        return self.ref_exists(f"refs/heads/{branch}")
 
     def ls_files(self) -> Iterator[str]:
         for line in self.cmd(["git", "ls-files"], quiet=True).splitlines():
             yield line.rstrip()
+
+    def on_orphan_branch(self) -> bool:
+        """
+        Returns true if HEAD points to a branch name which does not yet
+        exist. This generally only happens after `git init`, or `git
+        checkout --orphan`.
+        """
+        try:
+            head = self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True).strip()
+        except GitFailed:
+            return False
+        return not self.ref_exists(head)
+
+    def delete_index_and_files(self):
+        self.log_cmd("git ls-files -z | xargs -0 rm")
+        for file in self.ls_files():
+            path = os.path.join(self.directory, file)
+            if os.path.exists(path):
+                os.unlink(path)
+        self.cmd(["git", "read-tree", "--empty"])

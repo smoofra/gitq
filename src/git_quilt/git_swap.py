@@ -2,13 +2,12 @@
 
 import os
 import sys
-from contextlib import contextmanager, nullcontext
-from typing import List, Optional, Iterator, Set, TypeVar, ContextManager
+from contextlib import contextmanager
+from typing import List, Optional, Iterator, Set, TypeVar
 import argparse
 from textwrap import dedent
-from itertools import count
 
-from .continuations import Continuation, Suspend, Stop, Squash, Resume
+from .continuations import Continuation, Suspend, Stop, Squash, CheckoutBaseline, Resume
 from .git import Git, UserError, GitFailed, MergeFound
 
 T = TypeVar("T")
@@ -234,68 +233,18 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
             raise
 
 
-class DeleteBranch(Continuation):
-
-    def __init__(self, git: Git, branch: str):
-        super().__init__(git)
-        self.branch = branch
-
-    @contextmanager
-    def impl(self) -> Iterator[None]:
-        try:
-            yield
-        finally:
-            head = self.git.cmd(["git", "symbolic-ref", "HEAD"], quiet=True).strip()
-            if head == f"refs/heads/{self.branch}":
-                self.git.detach()
-            if self.git.branch_exists(self.branch):
-                self.git.cmd(["git", "branch", "-qD", self.branch])
-
-
-@contextmanager
-def temp_branch(git: Git) -> Iterator[str]:
-    """
-    Create a temporary branch with no content and no parents.
-    """
-
-    branches = set(git.branches())
-    for n in count():
-        branch = f"temp-{n}"
-        if branch not in branches:
-            break
-    else:
-        raise AssertionError
-
-    with DeleteBranch(git=git, branch=branch):
-        git.cmd(["git", "checkout", "-q", "--orphan", branch])
-        git.log_cmd("git ls-files -z | xargs -0 rm")
-        for file in git.ls_files():
-            os.unlink(os.path.join(git.directory, file))
-        git.cmd(["git", "read-tree", "--empty"])
-        yield branch
-
-
 # swap HEAD with HEAD^
 def swap(*, git: Git, edit: bool = False, baselines: Set[str]) -> None:
     one = git.commit("HEAD")
     try:
         two = git.unique_parent(one)
-        if len(two.parents) == 0:
-            three = None
-        else:
-            three = git.unique_parent(two)
+        three = git.unique_parent_or_root(two)
     except MergeFound as e:
         raise SwapFailed(f"Swap failed: {e}") from e
     if two.sha in baselines:
         raise SwapFailed("hit baseline")
     with SwapCheckpoint(git, head=one.sha):
-        context: ContextManager
-        if three:
-            git.checkout(three.sha)
-            context = nullcontext()
-        else:
-            context = temp_branch(git)
-        with context:
+        with CheckoutBaseline(git, three.sha if three else None):
             with PickCherryWithReference(git, cherry=two.sha, reference=one.sha):
                 try:
                     cherry_pick(one.sha, edit=edit, git=git)
