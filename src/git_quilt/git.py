@@ -144,7 +144,7 @@ class Git:
         ) and "" == self.cmd("git diff-files --name-only".split(), quiet=True)
 
     @property
-    def conflicted(self) -> bool:
+    def cherry_pick_in_progress(self) -> bool:
         return (self.gitdir / "CHERRY_PICK_HEAD").exists()
 
     def unique_parent(self, commit: Commit) -> Commit:

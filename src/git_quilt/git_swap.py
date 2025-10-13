@@ -98,7 +98,7 @@ class CherryPickContinue(Continuation):
             self.git.cmd(["git", "cherry-pick", "--abort"])
             raise
         else:
-            if self.git.conflicted:
+            if self.git.cherry_pick_in_progress:
                 self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
@@ -225,7 +225,7 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
     try:
         git.cmd(["git", "cherry-pick", "--allow-empty", ref])
     except GitFailed:
-        if edit and git.conflicted:
+        if edit and git.cherry_pick_in_progress:
             with CherryPickContinue(git):
                 raise Suspend
         else:
