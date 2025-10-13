@@ -2,7 +2,7 @@ import os
 import subprocess
 import shlex
 import re
-from typing import List, Iterator
+from typing import List, Iterator, NamedTuple
 from pathlib import Path
 import sys
 
@@ -19,6 +19,18 @@ class MergeFound(Exception):
 
 class UserError(Exception):
     pass
+
+
+class AuthorDate(NamedTuple):
+    name: str
+    email: str
+    date: str
+
+
+def split_author(line: str) -> AuthorDate:
+    m = re.match(r"\s*([^\<\>]+) <([^\<\>]+)> ([\d\-\+\s]+?)\s*$", line)
+    assert m
+    return AuthorDate(m.group(1), m.group(2), m.group(3))
 
 
 class Commit(object):
@@ -118,7 +130,7 @@ class Git:
         self.cmd(["git", "checkout", "-f", branch], stderr=FNULL)
 
     def commit(self, ref: str) -> Commit:
-        log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref], quiet=True)
+        log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref, "--"], quiet=True)
         return Commit(log=log)
 
     def checkout(self, branch: str) -> None:

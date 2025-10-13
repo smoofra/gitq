@@ -44,6 +44,13 @@ class Squash(Resume):
     pass
 
 
+# Raised into a resume stack by `git swap --fixup`.   This will replace the
+# most recent swap operation with a fixup, and then push everything back
+# onto the branch.
+class Fixup(Resume):
+    pass
+
+
 # A metaclass for continuation types.  This just collects a dict of them all
 # indexed by name.
 class ContinuationClass(type):
@@ -102,7 +109,13 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
 
     @classmethod
     def resume(
-        cls, git: Git, *, abort: bool = False, stop: bool = False, squash: bool = False
+        cls,
+        git: Git,
+        *,
+        abort: bool = False,
+        stop: bool = False,
+        squash: bool = False,
+        fixup: bool = False,
     ) -> None:
 
         if not os.path.exists(git.swap_json):
@@ -116,6 +129,8 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
                     raise Stop
                 elif squash:
                     raise Squash
+                elif fixup:
+                    raise Fixup
                 else:
                     return
             [k, *ks] = ks
@@ -131,8 +146,12 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         with cls.main(git):
             try:
                 r(j["continuations"])
-            except (Abort, Stop):
-                pass
+            except Abort:
+                print("swap aborted.")
+            except Resume as e:
+                raise Exception("Internal error.  Uncaught Resume") from e
+            except Suspend:
+                raise NotImplementedError  # FIXME
 
     @staticmethod
     @contextmanager

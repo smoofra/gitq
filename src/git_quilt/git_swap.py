@@ -7,8 +7,8 @@ from typing import List, Optional, Iterator, TypeVar
 import argparse
 from textwrap import dedent
 
-from .continuations import Continuation, Suspend, Stop, Squash, CheckoutBaseline, Resume
-from .git import Git, UserError, GitFailed, MergeFound
+from .continuations import Continuation, Suspend, Stop, Squash, Fixup, CheckoutBaseline, Resume
+from .git import Git, UserError, GitFailed, MergeFound, split_author
 
 T = TypeVar("T")
 
@@ -95,52 +95,67 @@ class CherryPickContinue(Continuation):
         try:
             yield
         except (Exception, Resume):
-            self.git.cmd(["git", "cherry-pick", "--abort"])
+            if self.git.cherry_pick_in_progress:
+                if self.git.on_orphan_branch():
+                    self.git.log_cmd(["rm", self.git.gitdir / "CHERRY_PICK_HEAD"])
+                    (self.git.gitdir / "CHERRY_PICK_HEAD").unlink()
+                    self.git.delete_index_and_files()
+                else:
+                    self.git.cmd(["git", "cherry-pick", "--abort"])
+
             raise
         else:
             if self.git.cherry_pick_in_progress:
                 self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
-# Handle the case when the user calls `git swap --squash`.
+# Handle the case when the user calls `git swap --squash`, etc..
 class OrSquash(Continuation):
 
-    def __init__(self, git: Git):
+    def __init__(self, git: Git, head: str):
+        self.head = head
         super().__init__(git)
-
-    @staticmethod
-    def edit():
-        (_, _, A, B, path) = sys.argv
-        with open(path, "w") as f:
-            print("pick", A, file=f)
-            print("squash", B, file=f)
 
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
             yield
-            return
+        except Fixup:
+            A = self.git.commit(self.head)
+            B = self.git.unique_parent(A)
+            C = self.git.unique_parent_or_root(B)
+            with CheckoutBaseline(self.git, C.sha if C else None):
+                self.git.cmd(["git", "read-tree", A.sha])
+                self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
+                self.git.cmd(["git", "reset", "--hard", "HEAD"])
+            raise Stop
         except Squash:
-            pass
-        A = self.git.commit("HEAD")
-        B = self.git.unique_parent(A)
-        C = self.git.unique_parent(B)
-        try:
-            self.git.cmd(
-                [
-                    "git",
-                    "-c",
-                    f"sequence.editor={sys.executable} {__file__} --edit-rebase {B.sha} {A.sha}",
-                    "rebase",
-                    "-i",
-                    C.sha,
-                ],
-                interactive=True,
-            )
-        except GitFailed:
-            self.git.cmd(["git", "rebase", "--abort"])
-            raise
-        raise Stop
+            A = self.git.commit(self.head)
+            B = self.git.unique_parent(A)
+            C = self.git.unique_parent_or_root(B)
+            with CheckoutBaseline(self.git, C.sha if C else None):
+                self.git.cmd(["git", "read-tree", A.sha])
+                author = split_author(B.author)
+                env = dict(os.environ)
+                env.update(
+                    {
+                        "GIT_AUTHOR_NAME": author.name,
+                        "GIT_AUTHOR_EMAIL": author.email,
+                        "GIT_AUTHOR_DATE": author.date,
+                    }
+                )
+                message = self.git.gitdir / "COMMIT_EDITMSG"
+                with open(message, "w") as f:
+                    f.write(B.message)
+                    f.write("\n\n")
+                    f.write(A.message)
+                self.git.cmd(["git", "commit", "--allow-empty", "--edit", "-F", message], env=env)
+                self.git.cmd(["git", "reset", "--hard", "HEAD"])
+            raise Stop
+        except Stop:
+            raise  # handled by KeepGoing
+        except Resume:
+            raise NotImplementedError
 
 
 # restore git state if swap failed
@@ -185,6 +200,17 @@ class KeepGoing(Continuation):
                 swap_or_squash(edit=self.edit, git=self.git, baselines=self.baselines)
 
 
+class SingleSwap(Continuation):
+    "Absorb Stop exceptions which might be raised by swap"
+
+    @contextmanager
+    def impl(self):
+        try:
+            yield
+        except Stop:
+            pass
+
+
 # wrap with KeepGoing if the user specified `--keep-going`
 @contextmanager
 def maybe_keep_going(
@@ -194,7 +220,8 @@ def maybe_keep_going(
         with KeepGoing(git, edit=edit, baselines=baselines):
             yield
     else:
-        yield
+        with SingleSwap(git):
+            yield
 
 
 # move HEAD to the specified commit, yield, then cherry-pick everything above it
@@ -263,15 +290,12 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
 
 # swap HEAD or HEAD^, or squash them together if the user resumes with `--squash`
 def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str]) -> None:
-    with OrSquash(git):
+    head = git.commit("HEAD")
+    with OrSquash(git, head=head.sha):
         swap(edit=edit, git=git, baselines=baselines)
 
 
 def main() -> None:
-
-    if len(sys.argv) > 1 and sys.argv[1] == "--edit-rebase":
-        OrSquash.edit()
-        return
 
     parser = argparse.ArgumentParser(description="swap the order of commits")
     parser.add_argument(
@@ -296,6 +320,9 @@ def main() -> None:
         "--squash", action="store_true", help="squash instead of completing this swap"
     )
     parser.add_argument(
+        "--fixup", action="store_true", help="fixup instead of completing this swap"
+    )
+    parser.add_argument(
         "--edit",
         "-e",
         action="store_true",
@@ -307,7 +334,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if sum(bool(x) for x in (args.resume, args.abort, args.stop, args.squash, args.status)) > 1:
+    modeargs = (args.resume, args.abort, args.stop, args.squash, args.fixup, args.status)
+    if sum(bool(x) for x in modeargs) > 1:
         parser.error("use only one of --continue, --abort, --stop, --status, or --squash")
 
     try:
@@ -317,8 +345,10 @@ def main() -> None:
             Continuation.status(git)
             return
 
-        if args.resume or args.abort or args.stop or args.squash:
-            Continuation.resume(git, abort=args.abort, stop=args.stop, squash=args.squash)
+        if args.resume or args.abort or args.stop or args.squash or args.fixup:
+            Continuation.resume(
+                git, abort=args.abort, stop=args.stop, squash=args.squash, fixup=args.fixup
+            )
             return
 
         if os.path.exists(git.swap_json):
