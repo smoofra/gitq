@@ -83,14 +83,18 @@ class Git:
         if not interactive:
             kw["stdin"] = FNULL
             kw["stdout"] = subprocess.PIPE
+            kw["stderr"] = subprocess.PIPE
         proc = subprocess.Popen(cmd, cwd=self.directory, encoding="utf8", **kw)
         (out, err) = proc.communicate()
+        err, _ = re.subn(r"^", "\t", err.strip(), flags=re.MULTILINE)
         if proc.wait() != 0:
-            raise GitFailed("git failed")
+            raise GitFailed(f"git failed:\n{err}")
         return out
 
     def cmd_test(self, args, **kw) -> bool:
-        proc = subprocess.Popen(args, cwd=self.directory, stdin=FNULL, **kw)
+        proc = subprocess.Popen(
+            args, cwd=self.directory, stdin=FNULL, stdout=FNULL, stderr=FNULL, **kw
+        )
         code = proc.wait()
         if code not in [0, 1]:
             raise GitFailed("git failed")
