@@ -1,6 +1,6 @@
 import sys
 import json
-from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator
+from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator, NoReturn
 from contextlib import contextmanager
 from itertools import count
 
@@ -149,8 +149,23 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
                 print("swap aborted.")
             except Resume as e:
                 raise Exception("Internal error.  Uncaught Resume") from e
-            except Suspend:
-                raise NotImplementedError  # FIXME
+            except Suspend as e:
+                Continuation.suspend(e, git=git)
+
+    @staticmethod
+    def suspend(e: Suspend, *, git: Git) -> NoReturn:
+        if e.status:
+            print(e.status)
+        with open(git.swap_json, "w") as f:
+            ks = [k.to_json_dict() for k in reversed(e.continuations)]
+            j: Dict
+            j = {"continuations": ks}
+            if e.status:
+                j["status"] = e.status
+            json.dump(j, f, indent=True)
+            f.write("\n")
+        print("Suspended!  Resolve conflicts and run: git swap --continue")
+        sys.exit(2)
 
     @staticmethod
     @contextmanager
@@ -160,18 +175,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         try:
             yield
         except Suspend as e:
-            if e.status:
-                print(e.status)
-            with open(git.swap_json, "w") as f:
-                ks = [k.to_json_dict() for k in reversed(e.continuations)]
-                j: Dict
-                j = {"continuations": ks}
-                if e.status:
-                    j["status"] = e.status
-                json.dump(j, f, indent=True)
-                f.write("\n")
-            print("Suspended!  Resolve conflicts and run: git swap --continue")
-            sys.exit(2)
+            Continuation.suspend(e, git=git)
         except Resume as e:
             raise Exception("Internal error.  Uncaught Resume") from e
 

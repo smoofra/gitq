@@ -2,7 +2,7 @@ import os
 import subprocess
 import shlex
 import re
-from typing import List, Iterator, NamedTuple
+from typing import List, Iterator, NamedTuple, Set
 from pathlib import Path
 import sys
 
@@ -214,3 +214,10 @@ class Git:
                 self.delete_index_and_files()
             else:
                 self.cmd(["git", "cherry-pick", "--abort"])
+
+    def has_unmerged_files(self) -> bool:
+        return bool(self.cmd(["git", "ls-files", "--unmerged"], quiet=True).strip())
+
+    def unmerged_files(self) -> Set[str]:
+        lines = self.cmd(["git", "ls-files", "--unmerged"], quiet=True).splitlines()
+        return {line.strip().split("\t", 1)[1] for line in lines}

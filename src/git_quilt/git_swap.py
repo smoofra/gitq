@@ -97,9 +97,12 @@ class CherryPickContinue(Continuation):
         except (Exception, Resume):
             self.git.cherry_pick_abort()
             raise
-        else:
-            if self.git.cherry_pick_in_progress:
-                self.git.cmd(["git", "cherry-pick", "--continue"])
+        if self.git.cherry_pick_in_progress:
+            if self.git.has_unmerged_files():
+                print("The index still has unmerged files.")
+                with CherryPickContinue(self.git):
+                    raise Suspend
+            self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
 # Handle the case when the user calls `git swap --squash`, etc..
@@ -239,8 +242,7 @@ def collect_cherries(commit: Optional[str], *, git: Git) -> Iterator[None]:
         yield
 
 
-# Perform a single cherry pick operation.  This is the only place Suspend can be
-# raised.
+# Perform a single cherry pick operation.
 def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
     try:
         git.cmd(["git", "cherry-pick", "--allow-empty", ref])

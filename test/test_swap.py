@@ -565,3 +565,52 @@ def test_swap_failed_root(repo: Git):
     repo.s("git commit -q -m A")
     repo.s("! git swap")
     assert "".join(repo.log()) == "aA"
+
+
+def test_resume_twice(repo: Git):
+    repo.w("a", "a")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w("a", "a\nb")
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    assert repo.log() == ["0", "a", "b"]
+    sha = repo.rev_parse("HEAD")
+    repo.s("! git swap --edit")
+    repo.s("! git swap --continue")
+    repo.w("a", "b")
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["0", "b", "a"]
+
+
+def test_keep_going_resume_twice(repo: Git):
+    for c in "abcdefg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    repo.w("z", "z")
+    repo.w("a", "a\nz")
+    repo.w("d", "d\nz")
+    repo.s("git add .")
+    repo.s("git commit -q -m z")
+
+    sha = repo.rev_parse("HEAD")
+    repo.s("! git swap --keep-going --edit")
+
+    assert repo.unmerged_files() == {"d"}
+    repo.w("d", "z")
+    repo.s("git add d")
+
+    repo.s("! git swap --continue")
+
+    assert repo.unmerged_files() == {"a"}
+    repo.w("a", "z")
+    repo.s("git add a")
+
+    repo.s("git swap --continue")
+
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "z0abcdefg"
