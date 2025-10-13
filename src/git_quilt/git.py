@@ -205,3 +205,12 @@ class Git:
             if os.path.exists(path):
                 os.unlink(path)
         self.cmd(["git", "read-tree", "--empty"])
+
+    def cherry_pick_abort(self) -> None:
+        if self.cherry_pick_in_progress:
+            if self.on_orphan_branch():
+                self.log_cmd(["rm", self.gitdir / "CHERRY_PICK_HEAD"])
+                (self.gitdir / "CHERRY_PICK_HEAD").unlink()
+                self.delete_index_and_files()
+            else:
+                self.cmd(["git", "cherry-pick", "--abort"])

@@ -95,14 +95,7 @@ class CherryPickContinue(Continuation):
         try:
             yield
         except (Exception, Resume):
-            if self.git.cherry_pick_in_progress:
-                if self.git.on_orphan_branch():
-                    self.git.log_cmd(["rm", self.git.gitdir / "CHERRY_PICK_HEAD"])
-                    (self.git.gitdir / "CHERRY_PICK_HEAD").unlink()
-                    self.git.delete_index_and_files()
-                else:
-                    self.git.cmd(["git", "cherry-pick", "--abort"])
-
+            self.git.cherry_pick_abort()
             raise
         else:
             if self.git.cherry_pick_in_progress:
@@ -256,7 +249,7 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
             with CherryPickContinue(git):
                 raise Suspend
         else:
-            git.cmd(["git", "cherry-pick", "--abort"])
+            git.cherry_pick_abort()
             raise
 
 

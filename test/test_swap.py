@@ -554,3 +554,14 @@ def test_keep_going_continue(repo: Git):
     repo.s("git swap --continue")
     assert repo.t(f"git diff {sha} HEAD")
     assert "".join(repo.log()) == "C0abcdefg"
+
+
+def test_swap_failed_root(repo: Git):
+    repo.w("a", "a")
+    repo.s("git add .")
+    repo.s("git commit -q --amend -m a")
+    repo.w("a", "A")
+    repo.s("git add .")
+    repo.s("git commit -q -m A")
+    repo.s("! git swap")
+    assert "".join(repo.log()) == "aA"
