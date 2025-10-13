@@ -57,6 +57,8 @@ class Commit(object):
 
 class Git:
 
+    gitdir: Path
+
     def __init__(self, directory=None):
         if directory is None:
             directory = "."
@@ -69,7 +71,7 @@ class Git:
             raise UserError("Error: not a git repository") from e
         if self.directory == "":
             raise UserError("Error: cannot find working directory.  bare repository?")
-        self.gitdir = self.cmd("git rev-parse --git-dir".split(), quiet=True).strip()
+        self.gitdir = Path(self.cmd("git rev-parse --git-dir".split(), quiet=True).strip())
 
     def log_cmd(self, cmd: List[str | Path] | str):
         if not isinstance(cmd, str):
@@ -123,8 +125,8 @@ class Git:
         self.cmd(["git", "checkout", branch], stderr=FNULL)
 
     @property
-    def swap_json(self) -> str:
-        return os.path.join(self.gitdir, "swap.json")
+    def swap_json(self) -> str:  # FIXME use Path
+        return str(self.gitdir / "swap.json")
 
     def baselines(self, branch: str) -> Set[str]:
         if not branch.startswith("refs/heads/"):
@@ -143,7 +145,7 @@ class Git:
 
     @property
     def conflicted(self) -> bool:
-        return os.path.exists(os.path.join(self.gitdir, "CHERRY_PICK_HEAD"))
+        return (self.gitdir / "CHERRY_PICK_HEAD").exists()
 
     def unique_parent(self, commit: Commit) -> Commit:
         if len(commit.parents) != 1:
