@@ -8,7 +8,7 @@ import argparse
 from textwrap import dedent
 from itertools import count
 
-from .continuations import Continuation, Suspend, Stop, Squash
+from .continuations import Continuation, Suspend, Stop, Squash, Resume
 from .git import Git, UserError, GitFailed, MergeFound
 
 T = TypeVar("T")
@@ -41,7 +41,8 @@ class EditBranch(Continuation[str]):
     def impl(self) -> Iterator[str]:
         try:
             yield self.head
-        except Exception:
+        except (Exception, Resume):
+            print("# git-swap has failed.  resetting to original HEAD")
             self.git.force_checkout(self.branch or self.head)
             raise
         else:
@@ -94,7 +95,7 @@ class CherryPickContinue(Continuation):
     def impl(self) -> Iterator[None]:
         try:
             yield
-        except Exception:
+        except (Exception, Resume):
             self.git.cmd(["git", "cherry-pick", "--abort"])
             raise
         else:
@@ -154,7 +155,8 @@ class SwapCheckpoint(Continuation):
     def impl(self) -> Iterator[None]:
         try:
             yield
-        except Exception:
+        except (Exception, Resume):
+            print("# reset back to before attempted swap")
             self.git.force_checkout(self.head)
             raise
 

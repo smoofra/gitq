@@ -26,16 +26,20 @@ class Abort(Exception):
     pass
 
 
+class Resume(BaseException):
+    pass
+
+
 # Raised into a resume stack by `git swap --stop`.  This will abandon the
 # most recent swap operation and push everything back onto the branch.
-class Stop(Exception):
+class Stop(Resume):
     pass
 
 
 # raised into a resume stack by `git swap --squash`.   This will replace the
 # most recent swap operation with a squash, and then push everything back onto
 # the branch.
-class Squash(Exception):
+class Squash(Resume):
     pass
 
 
@@ -149,6 +153,8 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
                 f.write("\n")
             print("Suspended!  Resolve conflicts and run: git swap --continue")
             sys.exit(2)
+        except Resume as e:
+            raise Exception("Internal error.  Uncaught Resume") from e
 
     @staticmethod
     def status(git: Git) -> None:
