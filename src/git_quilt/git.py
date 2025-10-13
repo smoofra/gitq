@@ -137,8 +137,8 @@ class Git:
         self.cmd(["git", "checkout", branch], stderr=FNULL)
 
     @property
-    def swap_json(self) -> str:  # FIXME use Path
-        return str(self.gitdir / "swap.json")
+    def swap_json(self) -> Path:
+        return self.gitdir / "swap.json"
 
     def baselines(self, branch: str) -> List[str]:
         if not branch.startswith("refs/heads/"):

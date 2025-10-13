@@ -1,4 +1,3 @@
-import os
 import sys
 import json
 from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator
@@ -118,7 +117,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         fixup: bool = False,
     ) -> None:
 
-        if not os.path.exists(git.swap_json):
+        if not git.swap_json.exists():
             raise UserError("Error: no git swap operation is in progress")
 
         def r(ks: List[Dict]) -> None:
@@ -141,7 +140,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
 
         with open(git.swap_json, "r") as f:
             j = json.load(f)
-        os.unlink(git.swap_json)
+        git.swap_json.unlink()
 
         with cls.main(git):
             try:
@@ -156,7 +155,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
     @staticmethod
     @contextmanager
     def main(git: Git) -> Iterator[None]:
-        if os.path.exists(git.swap_json):
+        if git.swap_json.exists():
             raise UserError("git-swap operation is already in progress")
         try:
             yield
@@ -178,7 +177,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
 
     @staticmethod
     def status(git: Git) -> None:
-        if os.path.exists(git.swap_json):
+        if git.swap_json.exists():
             with open(git.swap_json, "r") as f:
                 print(json.load(f).get("status", "unknown"))
         else:

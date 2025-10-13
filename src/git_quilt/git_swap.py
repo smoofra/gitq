@@ -351,7 +351,7 @@ def main() -> None:
             )
             return
 
-        if os.path.exists(git.swap_json):
+        if git.swap_json.exists():
             raise UserError("Error: git swap operation is already in progress")
 
         if not git.is_clean():
