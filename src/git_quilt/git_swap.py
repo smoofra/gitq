@@ -196,7 +196,33 @@ class KeepGoing(Continuation):
                 swap_or_squash(edit=self.edit, git=self.git, baselines=self.baselines)
 
 
-class SingleSwap(Continuation):
+class KeepGoingUp(Continuation):
+
+    def __init__(self, git: Git, *, edit: bool = False, cherries: List[str]):
+        super().__init__(git)
+        self.edit = edit
+        self.cherries = cherries
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        if not self.cherries:
+            yield
+            return
+        cherry, *cherries = self.cherries
+        with KeepGoingUp(self.git, edit=self.edit, cherries=cherries):
+            try:
+                yield  # cherry-pick previous cherries, and swap target commit on top of them
+            except Stop:
+                self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
+                raise
+            self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
+            try:
+                swap_or_squash(git=self.git, edit=self.edit, baselines=[])
+            except SwapFailed:
+                raise Stop
+
+
+class CatchStop(Continuation):
     "Absorb Stop exceptions which might be raised by swap"
 
     @contextmanager
@@ -216,7 +242,7 @@ def maybe_keep_going(
         with KeepGoing(git, edit=edit, baselines=baselines):
             yield
     else:
-        with SingleSwap(git):
+        with CatchStop(git):
             yield
 
 
@@ -276,7 +302,7 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
                 try:
                     cherry_pick(one.sha, edit=edit, git=git)
                 except GitFailed as e:
-                    raise SwapFailed("Swap failed.") from e
+                    raise SwapFailed(f"Swap failed: {e}") from e
                 except Suspend as e:
                     e.status = dedent(
                         f"""
@@ -309,6 +335,9 @@ def main() -> None:
         action="store_true",
         dest="resume",
         help="resume after conflicts have been resolved",
+    )
+    parser.add_argument(
+        "--up", action="store_true", help="swap the given commit with the one above it"
     )
     parser.add_argument(
         "--abort", action="store_true", help="give up and restore git to original state"
@@ -359,13 +388,28 @@ def main() -> None:
 
         with Continuation.main(git):
             with EditBranch(git) as branch:
-                baselines = git.baselines(branch)
-                commit = git.commit(args.commit) if args.commit else None
-                with edit_commit(commit, git=git):
-                    with maybe_keep_going(
-                        args.keep_going, git=git, edit=args.edit, baselines=baselines
-                    ):
-                        swap_or_squash(edit=args.edit, git=git, baselines=baselines)
+                if not args.up:
+                    baselines = git.baselines(branch)
+                    commit = git.commit(args.commit) if args.commit else None
+                    with edit_commit(commit, git=git):
+                        with maybe_keep_going(
+                            args.keep_going, git=git, edit=args.edit, baselines=baselines
+                        ):
+                            swap_or_squash(edit=args.edit, git=git, baselines=baselines)
+                else:
+                    if not args.commit:
+                        raise UserError("specify a commit")
+                    commit = git.commit(args.commit)
+                    cherries = collect_cherries(commit, git=git)
+                    if not cherries:
+                        raise UserError("commit is already at HEAD")
+                    if args.keep_going:
+                        with CatchStop(git):
+                            with KeepGoingUp(git=git, edit=args.edit, cherries=cherries):
+                                git.checkout(commit.sha)
+                    else:
+                        with edit_commit(git.commit(cherries[0]), git=git):
+                            swap_or_squash(edit=args.edit, git=git, baselines=[])
 
     except (SwapFailed, UserError) as e:
         print(e)

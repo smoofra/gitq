@@ -554,3 +554,128 @@ def test_keep_going_resume_twice(repo: Git):
 
     assert repo.t(f"git diff {sha} HEAD")
     assert "".join(repo.log()) == "zabcdefg"
+
+
+def test_swap_up(repo: Git):
+    repo.s("git commit --allow-empty -m 0")
+    repo.w("a", "aaa")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w("x", "xxx")
+    repo.s("git add .")
+    repo.s("git commit -q -m x")
+    assert repo.log() == ["0", "a", "x"]
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --up HEAD^")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["0", "x", "a"]
+
+
+def test_swap_up_root(repo: Git):
+    repo.w("a", "aaa")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w("x", "xxx")
+    repo.s("git add .")
+    repo.s("git commit -q -m x")
+    sha = repo.rev_parse("HEAD")
+    assert repo.log() == ["a", "x"]
+    repo.s("git swap --up HEAD^")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.log() == ["x", "a"]
+    assert all("temp" not in branch for branch in repo.branches())
+
+
+def test_keep_going_up(repo: Git):
+    for c in "abcd":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    repo.w("a", "A")
+    repo.s("git add .")
+    repo.s("git commit -q -m A")
+
+    for c in "efg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    assert "".join(repo.log()) == "abcdAefg"
+    sha = repo.rev_parse("HEAD")
+
+    repo.s("git swap --keep-going --up :/a")
+
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "bcdaAefg"
+
+
+def test_keep_going_up_fixup(repo: Git):
+    for c in "abcd":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    repo.w("a", "A")
+    repo.s("git add .")
+    repo.s("git commit -q -m A")
+
+    for c in "efg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    assert "".join(repo.log()) == "abcdAefg"
+    sha = repo.rev_parse("HEAD")
+
+    repo.s("! git swap --keep-going --up --edit :/a")
+
+    repo.s("git swap --fixup")
+
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "bcdaefg"
+
+
+def test_middle_up(repo: Git):
+    for c in "abcdefg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+    sha = repo.rev_parse("HEAD")
+    repo.s("git swap --up :/d")
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "abcedfg"
+
+
+def test_resume_middle_up(repo: Git):
+
+    for c in "abcd":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    repo.w(
+        "d",
+        """
+        d
+        D
+        """,
+    )
+    repo.s("git add .")
+    repo.s("git commit -q -m D")
+
+    for c in "efg":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+
+    assert "".join(repo.log()) == "abcdDefg"
+    sha = repo.rev_parse("HEAD")
+    repo.s("! git swap -e --up :/d")
+
+    repo.w("d", "D")
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+
+    assert repo.t(f"git diff {sha} HEAD")
+    assert "".join(repo.log()) == "abcDdefg"
