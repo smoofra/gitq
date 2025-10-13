@@ -1,3 +1,4 @@
+import sys
 import subprocess
 import textwrap
 from pathlib import Path
@@ -20,11 +21,16 @@ class Directory:
 
     def s(self, command: str):
         "run a shell command"
-        subprocess.run(command, shell=True, check=True, cwd=self.path)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        subprocess.run(command, shell=True, check=True, cwd=self.path, stderr=sys.stdout)
 
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"
-        return subprocess.run(command, shell=True, cwd=self.path).returncode == 0
+        sys.stdout.flush()
+        sys.stderr.flush()
+        proc = subprocess.run(command, shell=True, cwd=self.path, stderr=sys.stdout)
+        return proc.returncode == 0
 
     def w(self, filename: str, content: str):
         "write a file"
