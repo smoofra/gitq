@@ -268,7 +268,7 @@ def temp_branch(git: Git) -> Iterator[str]:
 
     with DeleteBranch(git=git, branch=branch):
         git.cmd(["git", "checkout", "-q", "--orphan", branch])
-        print("+ git ls-files -z | xargs -0 rm")
+        git.log_cmd("git ls-files -z | xargs -0 rm")
         for file in git.ls_files():
             os.unlink(os.path.join(git.directory, file))
         git.cmd(["git", "read-tree", "--empty"])

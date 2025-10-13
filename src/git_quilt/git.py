@@ -3,6 +3,8 @@ import subprocess
 import shlex
 import re
 from typing import List, Set, Iterator
+from pathlib import Path
+import sys
 
 FNULL = open(os.devnull, "w")
 
@@ -69,13 +71,19 @@ class Git:
             raise UserError("Error: cannot find working directory.  bare repository?")
         self.gitdir = self.cmd("git rev-parse --git-dir".split(), quiet=True).strip()
 
-    def cmd(self, args, *, quiet: bool = False, interactive: bool = False, **kw) -> str:
+    def log_cmd(self, cmd: List[str | Path] | str):
+        if not isinstance(cmd, str):
+            cmd = " ".join(map(lambda x: shlex.quote(str(x)), cmd))
+        print("+", cmd)
+        sys.stdout.flush()
+
+    def cmd(self, cmd, *, quiet: bool = False, interactive: bool = False, **kw) -> str:
         if not quiet:
-            print("+", " ".join(map(shlex.quote, args)))
+            self.log_cmd(cmd)
         if not interactive:
             kw["stdin"] = FNULL
             kw["stdout"] = subprocess.PIPE
-        proc = subprocess.Popen(args, cwd=self.directory, encoding="utf8", **kw)
+        proc = subprocess.Popen(cmd, cwd=self.directory, encoding="utf8", **kw)
         (out, err) = proc.communicate()
         if proc.wait() != 0:
             raise GitFailed("git failed")
