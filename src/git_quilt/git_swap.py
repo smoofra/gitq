@@ -328,10 +328,11 @@ def main() -> None:
         "--keep-going",
         "-k",
         action="store_true",
-        help="push COMMIT as far down the stack as it will go",
+        help="push COMMIT as far down (or up) the stack as it will go",
     )
     parser.add_argument(
         "--continue",
+        "-c",
         action="store_true",
         dest="resume",
         help="resume after conflicts have been resolved",
@@ -403,13 +404,13 @@ def main() -> None:
                     cherries = collect_cherries(commit, git=git)
                     if not cherries:
                         raise UserError("commit is already at HEAD")
-                    if args.keep_going:
-                        with CatchStop(git):
+                    with CatchStop(git):
+                        if args.keep_going:
                             with KeepGoingUp(git=git, edit=args.edit, cherries=cherries):
                                 git.checkout(commit.sha)
-                    else:
-                        with edit_commit(git.commit(cherries[0]), git=git):
-                            swap_or_squash(edit=args.edit, git=git, baselines=[])
+                        else:
+                            with edit_commit(git.commit(cherries[0]), git=git):
+                                swap_or_squash(edit=args.edit, git=git, baselines=[])
 
     except (SwapFailed, UserError) as e:
         print(e)
