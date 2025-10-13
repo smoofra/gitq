@@ -8,7 +8,7 @@ import argparse
 from textwrap import dedent
 
 from .continuations import Continuation, Suspend, Stop, Squash, Fixup, CheckoutBaseline, Resume
-from .git import Git, UserError, GitFailed, MergeFound, split_author
+from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 
 T = TypeVar("T")
 
@@ -220,25 +220,30 @@ def maybe_keep_going(
             yield
 
 
-# move HEAD to the specified commit, yield, then cherry-pick everything above it
-@contextmanager
-def collect_cherries(commit: Optional[str], *, git: Git) -> Iterator[None]:
+def collect_cherries(commit: Optional[Commit], *, git: Git) -> List[str]:
     if not commit:
-        yield
-        return
-    sha = git.rev_parse(commit)
+        return list()
     cherries: List[str] = list()
     head = git.commit("HEAD")
     while True:
-        if head.sha == sha:
-            break
+        if head.sha == commit.sha:
+            return list(reversed(cherries))
         cherries.append(head.sha)
         try:
             head = git.unique_parent(head)
         except MergeFound as e:
             raise UserError(f"Error: {e}") from e
-    git.checkout(sha)
-    with PickCherries(git, cherries=list(reversed(cherries))):
+
+
+# move HEAD to the specified commit, yield, then cherry-pick everything above it
+@contextmanager
+def edit_commit(commit: Optional[Commit], *, git: Git):
+    if not commit:
+        yield
+        return
+    cherries = collect_cherries(commit, git=git)
+    git.checkout(commit.sha)
+    with PickCherries(git, cherries=cherries):
         yield
 
 
@@ -355,7 +360,8 @@ def main() -> None:
         with Continuation.main(git):
             with EditBranch(git) as branch:
                 baselines = git.baselines(branch)
-                with collect_cherries(args.commit, git=git):
+                commit = git.commit(args.commit) if args.commit else None
+                with edit_commit(commit, git=git):
                     with maybe_keep_going(
                         args.keep_going, git=git, edit=args.edit, baselines=baselines
                     ):
