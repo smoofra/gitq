@@ -2,7 +2,7 @@ import os
 import subprocess
 import shlex
 import re
-from typing import List, Set, Iterator
+from typing import List, Iterator
 from pathlib import Path
 import sys
 
@@ -128,15 +128,15 @@ class Git:
     def swap_json(self) -> str:  # FIXME use Path
         return str(self.gitdir / "swap.json")
 
-    def baselines(self, branch: str) -> Set[str]:
+    def baselines(self, branch: str) -> List[str]:
         if not branch.startswith("refs/heads/"):
-            return set()
+            return list()
         branch = branch.removeprefix("refs/heads/")
         try:
             baseline = self.cmd(["git", "config", f"branch.{branch}.baseline"], quiet=True).strip()
         except GitFailed:
-            return set()
-        return {self.rev_parse(baseline)}
+            return list()
+        return [self.rev_parse(baseline)]
 
     def is_clean(self) -> bool:
         return "" == self.cmd(

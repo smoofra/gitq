@@ -3,7 +3,7 @@
 import os
 import sys
 from contextlib import contextmanager
-from typing import List, Optional, Iterator, Set, TypeVar
+from typing import List, Optional, Iterator, TypeVar
 import argparse
 from textwrap import dedent
 
@@ -163,7 +163,7 @@ class SwapCheckpoint(Continuation):
 # after ...AB as been swapped to ...BA, keep trying to push B down further
 class KeepGoing(Continuation):
 
-    def __init__(self, git: Git, *, edit: bool = False, baselines: Set[str]):
+    def __init__(self, git: Git, *, edit: bool = False, baselines: List[str]):
         super().__init__(git)
         self.edit = edit
         self.baselines = baselines
@@ -188,7 +188,7 @@ class KeepGoing(Continuation):
 # wrap with KeepGoing if the user specified `--keep-going`
 @contextmanager
 def maybe_keep_going(
-    keep_going: bool, *, edit: bool, git: Git, baselines: Set[str]
+    keep_going: bool, *, edit: bool, git: Git, baselines: List[str]
 ) -> Iterator[None]:
     if keep_going:
         with KeepGoing(git, edit=edit, baselines=baselines):
@@ -234,7 +234,7 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
 
 
 # swap HEAD with HEAD^
-def swap(*, git: Git, edit: bool = False, baselines: Set[str]) -> None:
+def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
     one = git.commit("HEAD")
     try:
         two = git.unique_parent(one)
@@ -262,7 +262,7 @@ def swap(*, git: Git, edit: bool = False, baselines: Set[str]) -> None:
 
 
 # swap HEAD or HEAD^, or squash them together if the user resumes with `--squash`
-def swap_or_squash(*, edit: bool = False, git: Git, baselines: Set[str]) -> None:
+def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str]) -> None:
     with OrSquash(git):
         swap(edit=edit, git=git, baselines=baselines)
 
