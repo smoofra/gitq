@@ -1,6 +1,6 @@
 [project]
 name = "git-quilt"
-version = "0.0.1"
+version = "0.0.2"
 description = "git based patch manager"
 authors = [
     {name = "Lawrence D'Anna",email = "larry@elder-gods.org"}
