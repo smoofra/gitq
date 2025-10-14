@@ -70,19 +70,19 @@ class Commit(object):
 class Git:
 
     gitdir: Path
+    directory: Path
 
     def __init__(self, directory=None):
-        if directory is None:
-            directory = "."
-        self.directory = directory
+        self.directory = Path(directory or ".")
         try:
-            self.directory = self.cmd(
+            top = self.cmd(
                 "git rev-parse --show-toplevel".split(), quiet=True, stderr=FNULL
             ).strip()
         except GitFailed as e:
             raise UserError("Error: not a git repository") from e
-        if self.directory == "":
+        if not top:
             raise UserError("Error: cannot find working directory.  bare repository?")
+        self.directory = Path(top)
         self.gitdir = Path(self.cmd("git rev-parse --git-dir".split(), quiet=True).strip())
 
     def log_cmd(self, cmd: List[str | Path] | str):
@@ -201,7 +201,7 @@ class Git:
     def delete_index_and_files(self):
         self.log_cmd("git ls-files -z | xargs -0 rm")
         for file in self.ls_files():
-            path = os.path.join(self.directory, file)
+            path = self.directory / file
             if os.path.exists(path):
                 os.unlink(path)
         self.cmd(["git", "read-tree", "--empty"])
