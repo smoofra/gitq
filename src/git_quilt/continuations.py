@@ -10,8 +10,9 @@ from .git import Git, UserError, GitFailed
 T = TypeVar("T")
 
 
-# Suspend execution and save a stack of continuations in .git/swap.json
 class Suspend(BaseException):
+    "Suspend execution and save a stack of continuations in .git/swap.json"
+
     continuations: List["Continuation"]
     status: Optional[str]
 
@@ -20,34 +21,15 @@ class Suspend(BaseException):
         self.status = None
 
 
-# Raised into a resume stack by `git swap --abort`.  This will abort the swap
-# operation and restore git to its previous state.
-class Abort(Exception):
-    pass
-
-
 class Resume(BaseException):
-    pass
+    "Resume execution with some additional instruction from the user."
 
 
-# Raised into a resume stack by `git swap --stop`.  This will abandon the
-# most recent swap operation and push everything back onto the branch.
-class Stop(Resume):
-    pass
-
-
-# raised into a resume stack by `git swap --squash`.   This will replace the
-# most recent swap operation with a squash, and then push everything back onto
-# the branch.
-class Squash(Resume):
-    pass
-
-
-# Raised into a resume stack by `git swap --fixup`.   This will replace the
-# most recent swap operation with a fixup, and then push everything back
-# onto the branch.
-class Fixup(Resume):
-    pass
+class Abort(Exception):
+    """
+    Raised into a resume stack by `--abort`.  This will abort the operation
+    and restore git to its previous state.
+    """
 
 
 # A metaclass for continuation types.  This just collects a dict of them all
@@ -111,10 +93,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         cls,
         git: Git,
         *,
-        abort: bool = False,
-        stop: bool = False,
-        squash: bool = False,
-        fixup: bool = False,
+        throw: BaseException | None,
     ) -> None:
 
         if not git.swap_json.exists():
@@ -122,14 +101,8 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
 
         def r(ks: List[Dict]) -> None:
             if not len(ks):
-                if abort:
-                    raise Abort
-                elif stop:
-                    raise Stop
-                elif squash:
-                    raise Squash
-                elif fixup:
-                    raise Fixup
+                if throw is not None:
+                    raise throw
                 else:
                     return
             [k, *ks] = ks
@@ -146,7 +119,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
             try:
                 r(j["continuations"])
             except Abort:
-                print("swap aborted.")
+                print("Cancelled.  Previous state restored.")
             except Resume as e:
                 raise Exception("Internal error.  Uncaught Resume") from e
             except Suspend as e:

@@ -8,16 +8,14 @@ import argparse
 from textwrap import dedent
 
 from .continuations import (
-    Continuation,
-    Suspend,
-    Stop,
-    Squash,
-    Fixup,
+    Abort,
     CheckoutBaseline,
-    Resume,
+    cherry_pick,
+    Continuation,
     EditBranch,
     PickCherries,
-    cherry_pick,
+    Resume,
+    Suspend,
 )
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 
@@ -25,7 +23,30 @@ T = TypeVar("T")
 
 
 class SwapFailed(Exception):
-    pass
+    "Swap Failed."
+
+
+class Stop(Resume):
+    """
+    Raised into a resume stack by `git swap --stop`.  This will abandon the
+    most recent swap operation and push everything back onto the branch.
+    """
+
+
+class Squash(Resume):
+    """
+    Raised into a resume stack by `git swap --squash`.   This will replace
+    the most recent swap operation with a squash, and then push everything
+    back onto the branch.
+    """
+
+
+class Fixup(Resume):
+    """
+    Raised into a resume stack by `git swap --fixup`.   This will replace
+    the most recent swap operation with a fixup, and then push everything
+    back onto the branch.
+    """
 
 
 # Pick a cherry, resolving conflicts using a reference commit.  When we swap the
@@ -305,9 +326,16 @@ def main() -> None:
             return
 
         if args.resume or args.abort or args.stop or args.squash or args.fixup:
-            Continuation.resume(
-                git, abort=args.abort, stop=args.stop, squash=args.squash, fixup=args.fixup
-            )
+            throw: BaseException | None = None
+            if args.abort:
+                throw = Abort()
+            elif args.stop:
+                throw = Stop()
+            elif args.squash:
+                throw = Squash()
+            elif args.fixup:
+                throw = Fixup()
+            Continuation.resume(git, throw=throw)
             return
 
         if git.swap_json.exists():
