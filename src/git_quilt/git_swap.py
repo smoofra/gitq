@@ -322,7 +322,7 @@ def main() -> None:
         git = Git()
 
         if args.status:
-            Continuation.status(git)
+            Continuation.status(git, tool="git-swap")
             return
 
         if args.resume or args.abort or args.stop or args.squash or args.fixup:
@@ -335,16 +335,16 @@ def main() -> None:
                 throw = Squash()
             elif args.fixup:
                 throw = Fixup()
-            Continuation.resume(git, throw=throw)
+            Continuation.resume(git, throw=throw, tool="git-swap")
             return
 
-        if git.swap_json.exists():
+        if git.continuation.exists():
             raise UserError("Error: git swap operation is already in progress")
 
         if not git.is_clean():
             raise UserError("Error: repo not clean")
 
-        with Continuation.main(git):
+        with Continuation.main(git, tool="git-swap"):
             with EditBranch(git, message="git-swap") as branch:
                 if not args.up:
                     baselines = git.baselines(branch)

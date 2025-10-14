@@ -11,12 +11,13 @@ T = TypeVar("T")
 
 
 class Suspend(BaseException):
-    "Suspend execution and save a stack of continuations in .git/swap.json"
+    "Suspend execution and save a stack of continuations in .git/continuation.json"
 
     continuations: List["Continuation"]
     status: Optional[str]
 
-    def __init__(self) -> None:
+    def __init__(self, message="") -> None:
+        super().__init__(message)
         self.continuations = list()
         self.status = None
 
@@ -92,12 +93,13 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
     def resume(
         cls,
         git: Git,
+        tool: str,
         *,
         throw: BaseException | None,
     ) -> None:
 
-        if not git.swap_json.exists():
-            raise UserError("Error: no git swap operation is in progress")
+        if not git.continuation.exists():
+            raise UserError(f"Error: no {tool} operation is in progress")
 
         def r(ks: List[Dict]) -> None:
             if not len(ks):
@@ -111,11 +113,15 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
             with T(git, **k):
                 r(ks)
 
-        with open(git.swap_json, "r") as f:
+        with open(git.continuation, "r") as f:
             j = json.load(f)
-        git.swap_json.unlink()
 
-        with cls.main(git):
+        if j["tool"] != tool:
+            raise UserError(f"A {tool} operation is currently in progress")
+
+        git.continuation.unlink()
+
+        with cls.main(git, tool):
             try:
                 r(j["continuations"])
             except Abort:
@@ -123,42 +129,48 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
             except Resume as e:
                 raise Exception("Internal error.  Uncaught Resume") from e
             except Suspend as e:
-                Continuation.suspend(e, git=git)
+                Continuation.suspend(e, git=git, tool=tool)
 
     @staticmethod
-    def suspend(e: Suspend, *, git: Git) -> NoReturn:
+    def suspend(e: Suspend, *, git: Git, tool: str) -> NoReturn:
         if e.status:
             print(e.status)
-        with open(git.swap_json, "w") as f:
+        with open(git.continuation, "w") as f:
             ks = [k.to_json_dict() for k in reversed(e.continuations)]
             j: Dict
             j = {"continuations": ks}
+            j["tool"] = tool
             if e.status:
                 j["status"] = e.status
             json.dump(j, f, indent=True)
             f.write("\n")
-        print("Suspended!  Resolve conflicts and run: git swap --continue")
+        print(f"Suspended!  {e}")
         sys.exit(2)
 
     @staticmethod
     @contextmanager
-    def main(git: Git) -> Iterator[None]:
-        if git.swap_json.exists():
-            raise UserError("git-swap operation is already in progress")
+    def main(git: Git, tool: str) -> Iterator[None]:
+        if git.continuation.exists():
+            with open(git.continuation, "r") as f:
+                j = json.load(f)
+            raise UserError(f"{j["tool"]} operation is already in progress.")
         try:
             yield
         except Suspend as e:
-            Continuation.suspend(e, git=git)
+            Continuation.suspend(e, git=git, tool=tool)
         except Resume as e:
             raise Exception("Internal error.  Uncaught Resume") from e
 
     @staticmethod
-    def status(git: Git) -> None:
-        if git.swap_json.exists():
-            with open(git.swap_json, "r") as f:
-                print(json.load(f).get("status", "unknown"))
-        else:
-            print("no swap operation in progress")
+    def status(git: Git, *, tool: str) -> None:
+        if not git.continuation.exists():
+            print("no operation in progress")
+            return
+        with open(git.continuation, "r") as f:
+            j = json.load(f)
+        if j["tool"] != tool:
+            raise UserError(f"{j["tool"]} operation is in progress, not {tool}")
+        print(j.get("status", "unknown"))
 
     def to_json_dict(self) -> Dict:
         j = self.__dict__
@@ -293,7 +305,7 @@ class CherryPickContinue(Continuation):
             if self.git.has_unmerged_files():
                 print("The index still has unmerged files.")
                 with CherryPickContinue(self.git):
-                    raise Suspend
+                    raise Suspend("Resolve conflicts and retry with --continue")
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
@@ -304,7 +316,7 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
             with CherryPickContinue(git):
-                raise Suspend
+                raise Suspend("Resolve conflicts and retry with --continue")
         else:
             git.cherry_pick_abort()
             raise
