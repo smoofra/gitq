@@ -9,6 +9,7 @@ import shutil
 import pytest
 
 import git_quilt.git
+from git_quilt.git_quilt import Quilt
 
 __all__ = ["Git", "repo"]
 
@@ -50,10 +51,14 @@ class Git(Directory, git_quilt.git.Git):
         git_quilt.git.Git.__init__(self, path)
 
     def log(self, n=None) -> List[str]:
-        command = ["git", "log", "--reverse", "--pretty=format:%s"]
+        command = ["git", "log", "--topo-order", "--reverse", "--format=%s"]
         if n is not None:
             command.append(f"-n{n}")
         return [line.strip() for line in self.cmd(command, quiet=True).splitlines()]
+
+    @property
+    def q(self):
+        return Quilt(self).q
 
 
 @pytest.fixture(scope="function")

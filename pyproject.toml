@@ -19,6 +19,7 @@ packages = [
 
 [project.scripts]
 git-swap = "git_quilt.git_swap:main"
+git-quilt = "git_quilt.git_quilt:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

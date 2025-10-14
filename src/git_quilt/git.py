@@ -105,6 +105,9 @@ class Git:
             raise GitFailed(f"git failed:\n{err}")
         return out
 
+    def __call__(self, *args, quiet: bool = False) -> str:
+        return self.cmd(["git", *args], quiet=quiet)
+
     def cmd_test(self, args, **kw) -> bool:
         proc = subprocess.Popen(
             args, cwd=self.directory, stdin=FNULL, stdout=FNULL, stderr=FNULL, **kw
@@ -116,6 +119,10 @@ class Git:
 
     def rev_parse(self, commit: str) -> str:
         return self.cmd(["git", "rev-parse", commit], quiet=True).strip()
+
+    def symbolic_full_name(self, commit: str) -> str | None:
+        name = self.cmd(["git", "rev-parse", "--symbolic-full-name", commit], quiet=True).strip()
+        return name or None
 
     def detach(self) -> None:
         self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL)
@@ -132,6 +139,14 @@ class Git:
     def commit(self, ref: str) -> Commit:
         log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref, "--"], quiet=True)
         return Commit(log=log)
+
+    def commits(self, *refs: str, reverse: bool = False) -> List[Commit]:
+        if reverse:
+            cmd = ["git", "log", "-z", "--no-notes", "--reverse", "--pretty=raw", *refs, "--"]
+        else:
+            cmd = ["git", "log", "-z", "--no-notes", "--pretty=raw", *refs, "--"]
+        logs = self.cmd(cmd, quiet=True)
+        return [Commit(log=log) for log in logs.split("\x00") if log]
 
     def checkout(self, branch: str) -> None:
         self.cmd(["git", "checkout", branch], stderr=FNULL)
@@ -151,9 +166,11 @@ class Git:
         return [self.rev_parse(baseline)]
 
     def is_clean(self) -> bool:
-        return "" == self.cmd(
-            "git diff-index --cached --name-only HEAD".split(), quiet=True
-        ) and "" == self.cmd("git diff-files --name-only".split(), quiet=True)
+        if self("diff-files", "--name-only", quiet=True):
+            return False
+        if self.on_orphan_branch():
+            return True
+        return not self("diff-index", "--cached", "--name-only", "HEAD", quiet=True)
 
     @property
     def cherry_pick_in_progress(self) -> bool:
@@ -221,3 +238,10 @@ class Git:
     def unmerged_files(self) -> Set[str]:
         lines = self.cmd(["git", "ls-files", "--unmerged"], quiet=True).splitlines()
         return {line.strip().split("\t", 1)[1] for line in lines}
+
+    def find_remote(self, url: str) -> str | None:
+        for line in self.cmd(["git", "remote", "-v"], quiet=True):
+            name, urlpart = line.rstrip().split("\t")
+            if urlpart == f"{url} (fetch)":
+                return name
+        return None
