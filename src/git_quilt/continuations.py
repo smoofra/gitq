@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Itera
 from contextlib import contextmanager
 from itertools import count
 
-from .git import Git, UserError
+from .git import Git, UserError, GitFailed
 
 
 T = TypeVar("T")
@@ -248,3 +248,90 @@ def CheckoutBaseline(git: Git, sha: str | None):
     else:
         git.checkout(sha)
         yield
+
+
+class EditBranch(Continuation[str]):
+    """
+    Detach from the current branch, so it can be edited without polluing
+    the reflog with a bunch of intermediate steps.   At the end, update the
+    branch using message, and check it back out again.
+    """
+
+    def __init__(self, git: Git, *, message: str, head: Optional[str] = None) -> None:
+        super().__init__(git)
+        self.message = message
+        if head:
+            self.head = head
+        else:
+            self.head = git.head()
+            git.detach()
+
+    @property
+    def branch(self) -> Optional[str]:
+        if self.head.startswith("refs/heads/"):
+            return self.head.removeprefix("refs/heads/") or None
+        return None
+
+    @contextmanager
+    def impl(self) -> Iterator[str]:
+        try:
+            yield self.head
+        except (Exception, Resume):
+            print("# Failed.  Resetting to original HEAD")
+            self.git.force_checkout(self.branch or self.head)
+            raise
+        else:
+            if self.branch:
+                self.git.cmd(["git", "update-ref", "-m", self.message, self.head, "HEAD"])
+                self.git.checkout(self.branch)
+
+
+class PickCherries(Continuation):
+    "Yield, then cherry-pick specified commits."
+
+    def __init__(self, git: Git, *, cherries: List[str]):
+        super().__init__(git)
+        self.cherries = cherries
+
+    @contextmanager
+    def impl(self) -> Iterator[None]:
+        yield
+        for cherry in self.cherries:
+            cherry_pick(cherry, git=self.git)
+
+
+class CherryPickContinue(Continuation):
+    """
+    When resuming, check if the user ran `git cherry-pick --continue`, and
+    do it for them if they have't.
+    """
+
+    def __init__(self, git: Git):
+        super().__init__(git)
+
+    @contextmanager
+    def impl(self) -> Iterator[None]:
+        try:
+            yield
+        except (Exception, Resume):
+            self.git.cherry_pick_abort()
+            raise
+        if self.git.cherry_pick_in_progress:
+            if self.git.has_unmerged_files():
+                print("The index still has unmerged files.")
+                with CherryPickContinue(self.git):
+                    raise Suspend
+            self.git.cmd(["git", "cherry-pick", "--continue"])
+
+
+def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
+    "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
+    try:
+        git.cmd(["git", "cherry-pick", "--allow-empty", ref])
+    except GitFailed:
+        if edit and git.cherry_pick_in_progress:
+            with CherryPickContinue(git):
+                raise Suspend
+        else:
+            git.cherry_pick_abort()
+            raise

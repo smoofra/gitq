@@ -7,7 +7,18 @@ from typing import List, Optional, Iterator, TypeVar
 import argparse
 from textwrap import dedent
 
-from .continuations import Continuation, Suspend, Stop, Squash, Fixup, CheckoutBaseline, Resume
+from .continuations import (
+    Continuation,
+    Suspend,
+    Stop,
+    Squash,
+    Fixup,
+    CheckoutBaseline,
+    Resume,
+    EditBranch,
+    PickCherries,
+    cherry_pick,
+)
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 
 T = TypeVar("T")
@@ -15,53 +26,6 @@ T = TypeVar("T")
 
 class SwapFailed(Exception):
     pass
-
-
-# Detach from the current branch, so it can be edited without polluting the
-# reflog with a bunch of intermediate steps.   At the end, update the branch and
-# check it back out again.
-class EditBranch(Continuation[str]):
-
-    def __init__(self, git: Git, *, head: Optional[str] = None) -> None:
-        super().__init__(git)
-        if head:
-            self.head = head
-        else:
-            self.head = git.head()
-            git.detach()
-
-    @property
-    def branch(self) -> Optional[str]:
-        if self.head.startswith("refs/heads/"):
-            return self.head.removeprefix("refs/heads/") or None
-        return None
-
-    @contextmanager
-    def impl(self) -> Iterator[str]:
-        try:
-            yield self.head
-        except (Exception, Resume):
-            print("# git-swap has failed.  resetting to original HEAD")
-            self.git.force_checkout(self.branch or self.head)
-            raise
-        else:
-            if self.branch:
-                self.git.cmd(["git", "update-ref", "-m", "git-swap", self.head, "HEAD"])
-                self.git.checkout(self.branch)
-
-
-# Yield and then pick a list of cherries.
-class PickCherries(Continuation):
-
-    def __init__(self, git: Git, *, cherries: List[str]):
-        super().__init__(git)
-        self.cherries = cherries
-
-    @contextmanager
-    def impl(self) -> Iterator[None]:
-        yield
-        for cherry in self.cherries:
-            cherry_pick(cherry, git=self.git)
 
 
 # Pick a cherry, resolving conflicts using a reference commit.  When we swap the
@@ -81,28 +45,6 @@ class PickCherryWithReference(Continuation):
         self.git.cmd(["git", "read-tree", self.reference])
         self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", self.cherry])
         self.git.cmd(["git", "reset", "--hard", "HEAD"])
-
-
-# When resuming, check if the user ran `git cherry-pick --continue`, and do it for
-# them if they have't.
-class CherryPickContinue(Continuation):
-
-    def __init__(self, git: Git):
-        super().__init__(git)
-
-    @contextmanager
-    def impl(self) -> Iterator[None]:
-        try:
-            yield
-        except (Exception, Resume):
-            self.git.cherry_pick_abort()
-            raise
-        if self.git.cherry_pick_in_progress:
-            if self.git.has_unmerged_files():
-                print("The index still has unmerged files.")
-                with CherryPickContinue(self.git):
-                    raise Suspend
-            self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
 # Handle the case when the user calls `git swap --squash`, etc..
@@ -273,19 +215,6 @@ def edit_commit(commit: Optional[Commit], *, git: Git):
         yield
 
 
-# Perform a single cherry pick operation.
-def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
-    try:
-        git.cmd(["git", "cherry-pick", "--allow-empty", ref])
-    except GitFailed:
-        if edit and git.cherry_pick_in_progress:
-            with CherryPickContinue(git):
-                raise Suspend
-        else:
-            git.cherry_pick_abort()
-            raise
-
-
 # swap HEAD with HEAD^
 def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
     one = git.commit("HEAD")
@@ -388,7 +317,7 @@ def main() -> None:
             raise UserError("Error: repo not clean")
 
         with Continuation.main(git):
-            with EditBranch(git) as branch:
+            with EditBranch(git, message="git-swap") as branch:
                 if not args.up:
                     baselines = git.baselines(branch)
                     commit = git.commit(args.commit) if args.commit else None
