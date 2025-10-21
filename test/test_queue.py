@@ -1,10 +1,10 @@
 from textwrap import dedent
-from git_quilt.quilt import QuiltFile
+from gitq.queue import QueueFile
 
 
 def test_yaml():
 
-    q = QuiltFile.loads("{}")
+    q = QueueFile.loads("{}")
     assert q.description is None
     assert q.baselines == []
 
@@ -20,7 +20,7 @@ def test_yaml():
           remote: https://example.com/project.git
     """
 
-    q = QuiltFile.loads(dedent(y))
+    q = QueueFile.loads(dedent(y))
     assert q.description == "This is a branch.\nFoo Bar Baz\n"
     foo, bar = q.baselines
     assert foo.ref is None
@@ -33,7 +33,7 @@ def test_yaml():
     assert dedent(y).strip() == q.dumps().strip()
 
     try:
-        QuiltFile.loads("lol: wtf")
+        QueueFile.loads("lol: wtf")
     except Exception:
         pass
     else:

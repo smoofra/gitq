@@ -1,4 +1,4 @@
-# git-quilt
+# Git Queues
 
 ##  ⚠️ 🪏 Work In Progress 🪏 ⚠️ 
 
@@ -8,7 +8,6 @@ There is a tool called git-swap which can re-order commits with less manual
 conflict resolution than `git rebase -i`
 
 ## Description
-
 
 
 This is my second attempt to make a git-based patch queue tool.

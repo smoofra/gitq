@@ -8,8 +8,8 @@ import shutil
 
 import pytest
 
-import git_quilt.git
-from git_quilt.git_quilt import Quilt
+import gitq.git
+from gitq.git_queue import Queue
 
 __all__ = ["Git", "repo"]
 
@@ -42,13 +42,13 @@ class Directory:
             f.write("\n")
 
 
-class Git(Directory, git_quilt.git.Git):
+class Git(Directory, gitq.git.Git):
 
     def __init__(self, path: Path):
         Directory.__init__(self, path)
         if not (path / ".git").exists():
             self.s("git init -q")
-        git_quilt.git.Git.__init__(self, path)
+        gitq.git.Git.__init__(self, path)
 
     def log(self, n=None) -> List[str]:
         command = ["git", "log", "--topo-order", "--reverse", "--format=%s"]
@@ -58,13 +58,13 @@ class Git(Directory, git_quilt.git.Git):
 
     @property
     def q(self):
-        return Quilt(self).q
+        return Queue(self).q
 
 
 @pytest.fixture(scope="function")
 def repo(tmp_path: Path) -> Git:
-    if "GIT_QUILT_TEMP_REPO" in os.environ:
-        tmp_path = Path(os.environ["GIT_QUILT_TEMP_REPO"])
+    if "GIT_QUEUE_TEMP_REPO" in os.environ:
+        tmp_path = Path(os.environ["GIT_QUEUE_TEMP_REPO"])
 
     os.makedirs(tmp_path, exist_ok=True)
 

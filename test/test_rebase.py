@@ -12,7 +12,7 @@ def test_rebase(repo: Git):
     repo.w("b", "b")
     repo.s("git add b && git commit -m b")
 
-    repo.s("git quilt init base")
+    repo.s("git queue init base")
 
     repo.s("git checkout base")
     repo.w("a", "A")
@@ -20,10 +20,10 @@ def test_rebase(repo: Git):
     base1 = repo.rev_parse("HEAD")
 
     repo.s("git checkout master")
-    assert repo.log() == ["a", "b", "initialized quilt"]
+    assert repo.log() == ["a", "b", "initialized queue"]
     assert [b.sha for b in repo.q.baselines] == [base0]
 
-    repo.s("git quilt rebase")
+    repo.s("git queue rebase")
     assert repo.log() == ["A", "baseline", "b"]
     assert [b.sha for b in repo.q.baselines] == [base1]
 
@@ -43,12 +43,12 @@ def test_two_baselines(repo: Git):
     b = repo.rev_parse("HEAD")
 
     repo.s("git checkout -b c master")
-    repo.s("git quilt init a b")
+    repo.s("git queue init a b")
     repo.w("c", "c")
     repo.s("git add c && git commit -m c")
     assert [b.sha for b in repo.q.baselines] == [a, b]
 
-    repo.s("git quilt rebase")
+    repo.s("git queue rebase")
     assert repo.log() == ["0", "a", "b", "merged baselines", "c"]
 
     repo.s("git checkout a")
@@ -57,6 +57,6 @@ def test_two_baselines(repo: Git):
     A = repo.rev_parse("HEAD")
 
     repo.s("git checkout c")
-    repo.s("git quilt rebase")
+    repo.s("git queue rebase")
     assert repo.log() == ["0", "a", "A", "b", "merged baselines", "c"]
     assert [b.sha for b in repo.q.baselines] == [A, b]

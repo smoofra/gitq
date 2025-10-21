@@ -4,12 +4,12 @@ from typing import Iterator
 from pathlib import Path
 
 from .git import Git, Commit, GitFailed, UserError
-from .quilt import QuiltFile, Baseline
+from .queue import QueueFile, Baseline
 from .continuations import EditBranch, Continuation, PickCherries
 
 
 def message(m: str, title: str | None):
-    trailers = "Tool: git-quilt"
+    trailers = "Tool: gitq"
     if title:
         return f"{m}: {title}\n\n{trailers}"
     else:
@@ -17,31 +17,31 @@ def message(m: str, title: str | None):
 
 
 def from_this_tool(c: Commit) -> bool:
-    return c.message.rstrip().endswith("\nTool: git-quilt")
+    return c.message.rstrip().endswith("\nTool: gitq")
 
 
-class Quilt:
+class Queue:
 
     git: Git
-    q: QuiltFile
+    q: QueueFile
 
-    quiltfile_name = ".git-quilt"
+    queuefile_name = ".git-queue"
 
     @property
-    def quiltfile_path(self) -> Path:
-        return self.git.directory / self.quiltfile_name
+    def queuefile_path(self) -> Path:
+        return self.git.directory / self.queuefile_name
 
     def __init__(self, git: Git):
         self.git = git
-        if not self.quiltfile_path.exists():
-            raise UserError("This branch is not a quilt.")
-        with open(self.quiltfile_path, "r") as f:
-            self.q = QuiltFile.load(f)
+        if not self.queuefile_path.exists():
+            raise UserError("This branch is not a queue.")
+        with open(self.queuefile_path, "r") as f:
+            self.q = QueueFile.load(f)
 
-    def save_quiltfile(self):
-        with open(self.quiltfile_path, "w") as f:
+    def save_queuefile(self):
+        with open(self.queuefile_path, "w") as f:
             self.q.dump(f)
-        self.git("add", self.quiltfile_path)
+        self.git("add", self.queuefile_path)
         self.git("commit", "--amend", "-C", "HEAD")
 
     def merge_baselines(self) -> Commit:
@@ -52,7 +52,7 @@ class Quilt:
         if not baselines:
             self.git.checkout(baseline.sha)
             self.git("commit", "--allow-empty", "-m", message("baseline", self.q.title))
-            self.save_quiltfile()
+            self.save_queuefile()
             return self.git.commit("HEAD")
 
         self.git.checkout(baseline.sha)
@@ -64,18 +64,18 @@ class Quilt:
         except GitFailed:
             self.git("merge", "--abort")
         else:
-            self.save_quiltfile()
+            self.save_queuefile()
             return self.git.commit("HEAD")
 
         for ref in refs:
             self.git.cmd(["git", "merge", ref])
 
-        self.save_quiltfile()
+        self.save_queuefile()
         return self.git.commit("HEAD")
 
     def init(self):
-        self.git("add", self.quiltfile_path)
-        self.git("commit", "-m", message("initialized quilt", self.q.title))
+        self.git("add", self.queuefile_path)
+        self.git("commit", "-m", message("initialized queue", self.q.title))
 
     def find_patches(self) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
@@ -85,7 +85,7 @@ class Quilt:
             if from_this_tool(commit):
                 continue
             changed = self.git("show", "--name-only", "--pretty=", commit.sha).strip()
-            if changed == self.quiltfile_name:
+            if changed == self.queuefile_name:
                 continue
             yield commit
 
@@ -97,8 +97,8 @@ class Quilt:
         patches = list(self.find_patches())
         self.q.baselines = [refresh_baseline(b, git=self.git) for b in self.q.baselines]
 
-        with Continuation.main(self.git, tool="git-quilt"):
-            with EditBranch(self.git, message="git-quilt rebase"):
+        with Continuation.main(self.git, tool="git-queue"):
+            with EditBranch(self.git, message="git-queue rebase"):
                 with PickCherries(self.git, cherries=[b.sha for b in patches]):
                     self.merge_baselines()
 
@@ -135,42 +135,42 @@ def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
 
 
 def main():
-    parser = argparse.ArgumentParser("git-quilt", description="manage a bunch of patches")
+    parser = argparse.ArgumentParser("git-queue", description="manage a bunch of patches")
     subs = parser.add_subparsers(dest="command")
 
-    init_parser = subs.add_parser("init", help="initialize a quilt")
+    init_parser = subs.add_parser("init", help="initialize a queue")
     init_parser.add_argument("baseline", action="extend", nargs="+")
     init_parser.add_argument("--title")
 
-    subs.add_parser("rebase", help="rebase quilt onto baselines")
+    subs.add_parser("rebase", help="rebase queue onto baselines")
 
-    subs.add_parser("tidy", help="normalize .git-quilt file")
+    subs.add_parser("tidy", help="normalize .git-queue file")
 
     args = parser.parse_args()
     if args.command is None:
         parser.print_usage()
 
     git = Git()
-    quiltfile = git.directory / ".git-quilt"
+    queuefile = git.directory / Queue.queuefile_name
 
     if args.command == "tidy":
-        if quiltfile.exists():
-            with open(quiltfile, "r") as f:
-                q = QuiltFile.load(f)
-            with open(quiltfile, "w") as f:
+        if queuefile.exists():
+            with open(queuefile, "r") as f:
+                q = QueueFile.load(f)
+            with open(queuefile, "w") as f:
                 q.dump(f)
 
     if args.command == "init":
         if not git.is_clean():
             raise UserError("Error: repo not clean")
         baselines = [parse_baseline(ref, git=git) for ref in args.baseline]
-        q = QuiltFile(baselines=list(baselines), title=args.title)
-        with open(quiltfile, "w") as f:
+        q = QueueFile(baselines=list(baselines), title=args.title)
+        with open(queuefile, "w") as f:
             q.dump(f)
-        Quilt(git).init()
+        Queue(git).init()
 
     if args.command == "rebase":
-        Quilt(git).rebase()
+        Queue(git).rebase()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from git_quilt.git import split_author
+from gitq.git import split_author
 
 
 def test_split():

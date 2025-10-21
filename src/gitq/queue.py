@@ -46,13 +46,13 @@ class Baseline(YAMLObject):
     remote: str | None = field(default=None)
 
 
-yaml.add_path_resolver("!QuiltFile", [], Loader=Loader)
+yaml.add_path_resolver("!QueueFile", [], Loader=Loader)
 yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader)
 
 
 @dataclass
-class QuiltFile(YAMLObject):
-    yaml_tag = "!QuiltFile"
+class QueueFile(YAMLObject):
+    yaml_tag = "!QueueFile"
     yaml_loader = Loader
     title: str | None = field(default=None)
     description: str | None = field(default=None)
