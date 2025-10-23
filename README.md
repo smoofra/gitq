@@ -58,6 +58,16 @@ the following distinguishing characteristics
 * Each patch is a git commit.   As much as possible, ordinary git commands
   are used to manipulate patches.
 
+* The commit history of a queue feels like a git commit history.  That is,
+  commits are user-curated checkpoints, with user-written commit messages.
+  The history is not a detailed log of every micro-operation that was used
+  to create a queue.   The data model is as simple as possible.   Git is a
+  "stupid" content tracker, because it tracks versions of the content of a
+  source directory.   There is no specific representation in git to, for
+  example, move a file.  The contents of the file are simply moved to a new
+  location.  Git Queues aims to track the content of a patch series in the
+  same spirit that Git tracks the content of a directory.
+
 
 ## `git-swap`
 
