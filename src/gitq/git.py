@@ -63,6 +63,10 @@ class Commit(object):
         m, _ = self.message.split("\n", 1)
         return f"{self.sha[:10]} {m}"
 
+    @property
+    def is_merge(self) -> bool:
+        return len(self.parents) > 1
+
     def __str__(self) -> str:
         return self.sha[:10]
 
@@ -141,10 +145,11 @@ class Git:
         return Commit(log=log)
 
     def commits(self, *refs: str, reverse: bool = False) -> List[Commit]:
+        cmd = ["git", "log", "--topo-order", "-z", "--no-notes", "--pretty=raw"]
         if reverse:
-            cmd = ["git", "log", "-z", "--no-notes", "--reverse", "--pretty=raw", *refs, "--"]
-        else:
-            cmd = ["git", "log", "-z", "--no-notes", "--pretty=raw", *refs, "--"]
+            cmd.append("--reverse")
+        cmd.extend(refs)
+        cmd.append("--")
         logs = self.cmd(cmd, quiet=True)
         return [Commit(log=log) for log in logs.split("\x00") if log]
 
@@ -245,3 +250,7 @@ class Git:
             if urlpart == f"{url} (fetch)":
                 return name
         return None
+
+    def is_conflicted(self, commit: Commit) -> bool:
+        cmd = ["git", "merge-tree", "--name-only", *commit.parents]
+        return self.cmd_test(cmd)

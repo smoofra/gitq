@@ -84,6 +84,11 @@ class Queue:
         for commit in commits:
             if from_this_tool(commit):
                 continue
+            if commit.is_merge:
+                if self.git.is_conflicted(commit):
+                    continue
+                else:
+                    raise UserError("rebasing merges is not implemented yet")
             changed = self.git("show", "--name-only", "--pretty=", commit.sha).strip()
             if changed == self.queuefile_name:
                 continue

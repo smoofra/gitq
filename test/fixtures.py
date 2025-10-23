@@ -48,6 +48,7 @@ class Git(Directory, gitq.git.Git):
         Directory.__init__(self, path)
         if not (path / ".git").exists():
             self.s("git init -q")
+            self.s("git config set advice.detachedHead false")
         gitq.git.Git.__init__(self, path)
 
     def log(self, n=None) -> List[str]:
