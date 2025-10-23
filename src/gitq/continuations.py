@@ -95,7 +95,7 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         git: Git,
         tool: str,
         *,
-        throw: BaseException | None,
+        throw: BaseException | None = None,
     ) -> None:
 
         if not git.continuation.exists():
@@ -274,15 +274,19 @@ class EditBranch(Continuation[str]):
 class PickCherries(Continuation):
     "Yield, then cherry-pick specified commits."
 
-    def __init__(self, git: Git, *, cherries: List[str]):
+    def __init__(self, git: Git, *, cherries: List[str], edit: bool = False):
         super().__init__(git)
         self.cherries = cherries
+        self.edit = edit
 
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        for cherry in self.cherries:
-            cherry_pick(cherry, git=self.git)
+        if not self.cherries:
+            return
+        cherry, *cherries = self.cherries
+        with PickCherries(self.git, cherries=cherries, edit=self.edit):
+            cherry_pick(cherry, git=self.git, edit=self.edit)
 
 
 class CherryPickContinue(Continuation):
@@ -316,7 +320,9 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
             with CherryPickContinue(git):
-                raise Suspend("Resolve conflicts and retry with --continue")
+                suspend = Suspend("Resolve conflicts and retry with --continue")
+                suspend.status = f"cherry-picking {ref}"
+                raise suspend
         else:
             git.cherry_pick_abort()
             raise

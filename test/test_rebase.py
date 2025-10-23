@@ -90,3 +90,44 @@ def test_rebase_merge(repo: Git):
 
     assert repo.log() == ["A", "baseline", "b", "c"]
     assert [b.sha for b in repo.q.baselines] == [base1]
+
+
+def test_rebase_conflict(repo: Git):
+    repo.w("a", "a")
+    repo.s("git add a && git commit -q -m a")
+    repo.s("git branch base HEAD")
+
+    repo.w("b", "b")
+    repo.s("git add b && git commit -q -m b")
+
+    repo.w("c", "c")
+    repo.s("git add c && git commit -q -m c")
+
+    repo.s("git queue init base")
+
+    repo.s("git checkout base")
+    repo.w("a", "A")
+    repo.w("b", "")
+    repo.w("c", "")
+    repo.s("git add a b c")
+    repo.s("git commit -a --amend -m A -q")
+    base1 = repo.rev_parse("HEAD")
+
+    repo.s("git checkout master")
+    sha = repo.rev_parse("HEAD")
+
+    repo.s("! git queue rebase")
+    assert repo.unmerged() == {"b"}
+
+    repo.w("b", "b")
+    repo.s("git add b")
+    repo.s("! git queue continue")
+
+    assert repo.unmerged() == {"c"}
+    repo.w("c", "c")
+    repo.s("git add c")
+    repo.s("git queue continue")
+
+    assert repo.log() == ["A", "baseline", "b", "c"]
+    assert [b.sha for b in repo.q.baselines] == [base1]
+    assert set(repo("diff", "--name-only", sha, "HEAD").splitlines()) == {"a", ".git-queue"}

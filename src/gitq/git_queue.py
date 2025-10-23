@@ -104,7 +104,7 @@ class Queue:
 
         with Continuation.main(self.git, tool="git-queue"):
             with EditBranch(self.git, message="git-queue rebase"):
-                with PickCherries(self.git, cherries=[b.sha for b in patches]):
+                with PickCherries(self.git, cherries=[b.sha for b in patches], edit=True):
                     self.merge_baselines()
 
 
@@ -148,8 +148,9 @@ def main():
     init_parser.add_argument("--title")
 
     subs.add_parser("rebase", help="rebase queue onto baselines")
-
     subs.add_parser("tidy", help="normalize .git-queue file")
+    subs.add_parser("status")
+    subs.add_parser("continue")
 
     args = parser.parse_args()
     if args.command is None:
@@ -176,6 +177,12 @@ def main():
 
     if args.command == "rebase":
         Queue(git).rebase()
+
+    if args.command == "status":
+        Continuation.status(git, tool="git-queue")
+
+    if args.command == "continue":
+        Continuation.resume(git, tool="git-queue")
 
 
 if __name__ == "__main__":

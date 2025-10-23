@@ -57,6 +57,10 @@ class Git(Directory, gitq.git.Git):
             command.append(f"-n{n}")
         return [line.strip() for line in self.cmd(command, quiet=True).splitlines()]
 
+    def unmerged(self) -> set[str]:
+        lines = self("ls-files", "-u").splitlines()
+        return {line.split("\t", 1)[1] for line in lines}
+
     @property
     def q(self):
         return Queue(self).q
