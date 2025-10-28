@@ -138,26 +138,35 @@ class SwapCheckpoint(Continuation):
 # after ...AB as been swapped to ...BA, keep trying to push B down further
 class KeepGoing(Continuation):
 
-    def __init__(self, git: Git, *, edit: bool = False, baselines: List[str]):
+    def __init__(
+        self,
+        git: Git,
+        *,
+        edit: bool = False,
+        baselines: List[str],
+        cherries: List[str] | None = None,
+    ):
         super().__init__(git)
         self.edit = edit
         self.baselines = baselines
+        self.cherries = cherries or list()
 
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
             yield  # swap
-        except (SwapFailed, Stop):
-            return
-        A = self.git.commit("HEAD")
-        try:
-            B = self.git.unique_parent(A)
-        except MergeFound:
-            return
-        self.git.checkout(B.sha)
-        with PickCherries(self.git, cherries=[A.sha]):
-            with KeepGoing(self.git, edit=self.edit, baselines=self.baselines):
+
+            while True:
+                A = self.git.commit("HEAD")
+                B = self.git.unique_parent(A)
+                self.cherries = [A.sha] + self.cherries
+                self.git.checkout(B.sha)
                 swap_or_squash(edit=self.edit, git=self.git, baselines=self.baselines)
+
+        except (SwapFailed, MergeFound, Stop):
+            for cherry in self.cherries:
+                cherry_pick(cherry, git=self.git)
+            return
 
 
 class KeepGoingUp(Continuation):
@@ -169,21 +178,16 @@ class KeepGoingUp(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
-        if not self.cherries:
-            yield
-            return
-        cherry, *cherries = self.cherries
-        with KeepGoingUp(self.git, edit=self.edit, cherries=cherries):
-            try:
-                yield  # cherry-pick previous cherries, and swap target commit on top of them
-            except Stop:
+        try:
+            yield  # check out base commit
+            while self.cherries:
+                cherry, *self.cherries = self.cherries
                 self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
-                raise
-            self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
-            try:
                 swap_or_squash(git=self.git, edit=self.edit, baselines=[])
-            except SwapFailed:
-                raise Stop
+        except (Stop, SwapFailed):
+            pass
+        for cherry in self.cherries:
+            self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
 
 
 class CatchStop(Continuation):

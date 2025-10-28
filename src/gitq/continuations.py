@@ -44,8 +44,14 @@ class ContinuationClass(type):
         return T
 
 
-# A continuation is  is a context manager that can be suspended, serialized out
-# to json, and then resumed in a subsequent execution of this program.
+# A continuation is  is a context manager that can be suspended, serialized
+# out to json, and then resumed in a subsequent execution of this program.
+#
+# This is a very low-tech approach to serializeable continuations, and it
+# relies on suspendable code being written in a strange idiom to work.
+#
+# Anything that needs to happen after a resume needs to be expressed as a
+# stack of `Continuation` instances, rather than ordinary function calls.
 #
 # A continuation class must:
 #
@@ -54,15 +60,21 @@ class ContinuationClass(type):
 #   * have a 1-1 correspondence between those attributes and `__init__`
 #     keywords
 #
-#   * perform no side effects in `__init__`, EXCEPT as a result of normalizing
-#     those attributes.  For example, `EditBranch` takes an optional argument
-#     `head`.   If `head is None`, then it does an effectful initialization, and
-#     sets `head` to something.   If `head is not None`, then no initialization
-#     is performed.
+#   * perform no side effects in `__init__`, EXCEPT as a result of
+#     normalizing those attributes.  For example, `EditBranch` takes an
+#     optional argument `head`.   If `head is None`, then it does an
+#     effectful initialization, and sets `head` to something.   If `head is
+#     not None`, then no initialization is performed.
 #
-#   * implement a context manager overriding .impl()
+#   * implement a context manager overriding `.impl()`
 #
-#   * perform no side effects in impl() prior to yield
+#   * perform no side effects in `.impl()` prior to yield
+#
+#   * be prepared to reconstruct the execution state of `.impl()`, if it
+#     calls anything that might raise Suspend.   In other words, there is
+#     no magic here that somehow serializes the python execution state.
+#     Each `Continuation` instance is just going to be reanimated based on
+#     its json-serializeable attributes, and resume again from the yield.
 #
 class Continuation(Generic[T], metaclass=ContinuationClass):
 
@@ -76,14 +88,19 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         self.manager = self.impl()
         return self.manager.__enter__()
 
-    def __exit__(self, typ, value, traceback) -> bool | None:
-        if typ and issubclass(typ, Suspend):
-            if value is None:
-                value = typ()
-            value.continuations.append(self)
+    def __exit__(self, exception_type, exception, traceback) -> bool | None:
+        if exception is None and exception_type is not None:
+            exception = exception_type()
+
+        if isinstance(exception, Suspend):
+            exception.continuations.append(self)
             return None
-        else:
-            return self.manager.__exit__(typ, value, traceback)
+
+        try:
+            return self.manager.__exit__(exception_type, exception, traceback)
+        except Suspend as exception:
+            exception.continuations.append(self)
+            raise
 
     def impl(self) -> ContextManager[T]:
         # any initialization that occurs before yield should be done in __init__, not here
@@ -282,10 +299,8 @@ class PickCherries(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        if not self.cherries:
-            return
-        cherry, *cherries = self.cherries
-        with PickCherries(self.git, cherries=cherries, edit=self.edit):
+        while self.cherries:
+            cherry, *self.cherries = self.cherries
             cherry_pick(cherry, git=self.git, edit=self.edit)
 
 
@@ -308,8 +323,7 @@ class CherryPickContinue(Continuation):
         if self.git.cherry_pick_in_progress:
             if self.git.has_unmerged_files():
                 print("The index still has unmerged files.")
-                with CherryPickContinue(self.git):
-                    raise Suspend("Resolve conflicts and retry with --continue")
+                raise Suspend("Resolve conflicts and retry with --continue")
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
