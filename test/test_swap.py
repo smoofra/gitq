@@ -14,7 +14,7 @@ def test_swap(repo: Git):
     assert repo.log() == ["0", "a", "x"]
     sha = repo.rev_parse("HEAD")
     repo.s("git swap")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["0", "x", "a"]
 
 
@@ -28,7 +28,7 @@ def test_swap_root(repo: Git):
     sha = repo.rev_parse("HEAD")
     assert repo.log() == ["a", "x"]
     repo.s("git swap")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["x", "a"]
     assert all("temp" not in branch for branch in repo.branches())
 
@@ -40,10 +40,10 @@ def test_swap_empty(repo: Git):
     repo.s("git commit -q -m a")
     sha = repo.rev_parse("HEAD")
     repo.s("git swap")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "a0"
     repo.s("git swap")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "0a"
 
 
@@ -61,7 +61,7 @@ def test_resume(repo: Git):
     repo.w("a", "bbb")
     repo.s("git add -u")
     repo.s("git swap --continue")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["0", "b", "a"]
 
 
@@ -78,7 +78,7 @@ def test_resume_root(repo: Git):
     repo.w("a", "bbb")
     repo.s("git add -u")
     repo.s("git swap --continue")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["b", "a"]
 
 
@@ -92,7 +92,7 @@ def test_keep_going(repo: Git):
     repo.s("git commit -q -m B")
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --keep-going")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abBcdefg"
 
 
@@ -103,7 +103,7 @@ def test_middle(repo: Git):
         repo.s(f"git commit -q -m {c}")
     sha = repo.rev_parse("HEAD")
     repo.s("git swap :/e")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcedfg"
 
 
@@ -125,7 +125,7 @@ def test_middle_keep_going(repo: Git):
 
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --keep-going :/B")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abBcdefghij"
 
 
@@ -140,7 +140,7 @@ def test_keep_going_root(repo: Git):
 
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --keep-going")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "ba"
 
 
@@ -152,7 +152,7 @@ def test_keep_going_root_longer(repo: Git):
 
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --keep-going")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "dabc"
 
 
@@ -164,7 +164,7 @@ def test_keep_going_root_longer_empty(repo: Git):
         repo.s(f"git commit -q -m {c}")
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --keep-going")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "d0abc"
 
 
@@ -197,7 +197,7 @@ def test_resume_middle(repo: Git):
     repo.s("git add -u")
     repo.s("git swap --continue")
 
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcDdefg"
 
 
@@ -227,7 +227,7 @@ def test_resume_middle_fixup(repo: Git):
     repo.s("! git swap -e :/D")
     repo.s("git swap --fixup")
 
-    assert repo.t(f"git diff --quiet {sha} HEAD")
+    assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abcdefg"
 
 
@@ -253,7 +253,7 @@ def test_resume_fixup(repo: Git):
     sha = repo.rev_parse("HEAD")
     repo.s("! git swap -e :/B")
     repo.s("git swap --fixup")
-    assert repo.t(f"git diff --quiet {sha} HEAD")
+    assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
 
 
@@ -290,7 +290,7 @@ def test_resume_squash(repo: Git):
     sha = repo.rev_parse("HEAD")
     repo.s("! git swap -e :/B")
     repo.s("EDITOR=true git swap --squash")
-    assert repo.t(f"git diff --quiet {sha} HEAD")
+    assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
 
     a = repo.commit("HEAD^^")
@@ -329,7 +329,7 @@ def test_resume_fixup_root(repo: Git):
     sha = repo.rev_parse("HEAD")
     repo.s("! git swap -e :/A")
     repo.s("git swap --fixup")
-    assert repo.t(f"git diff --quiet {sha} HEAD")
+    assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
 
 
@@ -355,7 +355,7 @@ def test_resume_squash_root(repo: Git):
     sha = repo.rev_parse("HEAD")
     repo.s("! git swap -e :/A")
     repo.s("EDITOR=true git swap --squash")
-    assert repo.t(f"git diff --quiet {sha} HEAD")
+    assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
 
     a = repo.commit("HEAD^^")
@@ -373,7 +373,7 @@ def test_keep_going_stop(repo: Git):
     sha = repo.rev_parse("HEAD")
     repo.s("! git swap --keep-going -e")
     repo.s("git swap --stop")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abBcdefg"
 
 
@@ -389,7 +389,7 @@ def test_keep_going_fixup(repo: Git):
     assert "".join(repo.log()) == "abcdefgB"
     repo.s("! git swap --keep-going -e")
     repo.s("git swap --fixup")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcdefg"
 
 
@@ -405,7 +405,7 @@ def test_keep_going_squash(repo: Git):
     assert "".join(repo.log()) == "abcdefgB"
     repo.s("! git swap --keep-going -e")
     repo.s("EDITOR=true git swap --squash")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcdefg"
 
 
@@ -423,7 +423,7 @@ def test_keep_going_continue(repo: Git):
     repo.w("c", "C")
     repo.s("git add -u")
     repo.s("git swap --continue")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "Cabcdefg"
 
 
@@ -453,7 +453,7 @@ def test_resume_twice(repo: Git):
     repo.w("a", "b")
     repo.s("git add -u")
     repo.s("git swap --continue")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["0", "b", "a"]
 
 
@@ -484,7 +484,7 @@ def test_keep_going_resume_twice(repo: Git):
 
     repo.s("git swap --continue")
 
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "zabcdefg"
 
 
@@ -499,7 +499,7 @@ def test_swap_up(repo: Git):
     assert repo.log() == ["0", "a", "x"]
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --up HEAD^")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["0", "x", "a"]
 
 
@@ -513,7 +513,7 @@ def test_swap_up_root(repo: Git):
     sha = repo.rev_parse("HEAD")
     assert repo.log() == ["a", "x"]
     repo.s("git swap --up HEAD^")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.log() == ["x", "a"]
     assert all("temp" not in branch for branch in repo.branches())
 
@@ -538,7 +538,7 @@ def test_keep_going_up(repo: Git):
 
     repo.s("git swap --keep-going --up :/a")
 
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "bcdaAefg"
 
 
@@ -564,7 +564,7 @@ def test_keep_going_up_fixup(repo: Git):
 
     repo.s("git swap --fixup")
 
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "bcdaefg"
 
 
@@ -575,7 +575,7 @@ def test_middle_up(repo: Git):
         repo.s(f"git commit -q -m {c}")
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --up :/d")
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcedfg"
 
 
@@ -609,5 +609,5 @@ def test_resume_middle_up(repo: Git):
     repo.s("git add -u")
     repo.s("git swap --continue")
 
-    assert repo.t(f"git diff {sha} HEAD")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcDdefg"
