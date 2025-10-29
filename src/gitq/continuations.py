@@ -3,6 +3,7 @@ import json
 from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator, NoReturn
 from contextlib import contextmanager
 from itertools import count
+from abc import abstractmethod
 
 from .git import Git, UserError, GitFailed
 
@@ -16,10 +17,10 @@ class Suspend(BaseException):
     continuations: List["Continuation"]
     status: Optional[str]
 
-    def __init__(self, message="") -> None:
-        super().__init__(message)
+    def __init__(self, *, status: str | None = None) -> None:
+        super().__init__()
+        self.status = status
         self.continuations = list()
-        self.status = None
 
 
 class Resume(BaseException):
@@ -102,92 +103,9 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
             exception.continuations.append(self)
             raise
 
+    @abstractmethod
     def impl(self) -> ContextManager[T]:
-        # any initialization that occurs before yield should be done in __init__, not here
-        raise NotImplementedError
-
-    @classmethod
-    def resume(
-        cls,
-        git: Git,
-        tool: str,
-        *,
-        throw: BaseException | None = None,
-    ) -> None:
-
-        if not git.continuation.exists():
-            raise UserError(f"Error: no {tool} operation is in progress")
-
-        def r(ks: List[Dict]) -> None:
-            if not len(ks):
-                if throw is not None:
-                    raise throw
-                else:
-                    return
-            [k, *ks] = ks
-            T = ContinuationClass.types[k["kind"]]
-            del k["kind"]
-            with T(git, **k):
-                r(ks)
-
-        with open(git.continuation, "r") as f:
-            j = json.load(f)
-
-        if j["tool"] != tool:
-            raise UserError(f"A {tool} operation is currently in progress")
-
-        git.continuation.unlink()
-
-        with cls.main(git, tool):
-            try:
-                r(j["continuations"])
-            except Abort:
-                print("Cancelled.  Previous state restored.")
-            except Resume as e:
-                raise Exception("Internal error.  Uncaught Resume") from e
-            except Suspend as e:
-                Continuation.suspend(e, git=git, tool=tool)
-
-    @staticmethod
-    def suspend(e: Suspend, *, git: Git, tool: str) -> NoReturn:
-        if e.status:
-            print(e.status)
-        with open(git.continuation, "w") as f:
-            ks = [k.to_json_dict() for k in reversed(e.continuations)]
-            j: Dict
-            j = {"continuations": ks}
-            j["tool"] = tool
-            if e.status:
-                j["status"] = e.status
-            json.dump(j, f, indent=True)
-            f.write("\n")
-        print(f"Suspended!  {e}")
-        sys.exit(2)
-
-    @staticmethod
-    @contextmanager
-    def main(git: Git, tool: str) -> Iterator[None]:
-        if git.continuation.exists():
-            with open(git.continuation, "r") as f:
-                j = json.load(f)
-            raise UserError(f"{j["tool"]} operation is already in progress.")
-        try:
-            yield
-        except Suspend as e:
-            Continuation.suspend(e, git=git, tool=tool)
-        except Resume as e:
-            raise Exception("Internal error.  Uncaught Resume") from e
-
-    @staticmethod
-    def status(git: Git, *, tool: str) -> None:
-        if not git.continuation.exists():
-            print("no operation in progress")
-            return
-        with open(git.continuation, "r") as f:
-            j = json.load(f)
-        if j["tool"] != tool:
-            raise UserError(f"{j["tool"]} operation is in progress, not {tool}")
-        print(j.get("status", "unknown"))
+        pass
 
     def to_json_dict(self) -> Dict:
         j = self.__dict__
@@ -195,6 +113,101 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
         del j["git"]
         del j["manager"]
         return j
+
+
+class Main:
+
+    tool: str
+    suspend_message = "Suspended!"
+
+    @abstractmethod
+    def main(self) -> None:
+        pass
+
+    def __call__(self) -> NoReturn:
+        self.git = Git()
+        try:
+            self.main()
+        except UserError as e:
+            print(e)
+            sys.exit(1)
+        except Abort:
+            print("Cancelled.  Previous state restored.")
+        sys.exit(0)
+
+    @contextmanager
+    def setup(self) -> Iterator:
+        if not self.git.is_clean():
+            raise UserError("Error: repo not clean")
+        if self.git.continuation.exists():
+            with open(self.git.continuation, "r") as f:
+                j = json.load(f)
+            raise UserError(f"{j["tool"]} operation is already in progress.")
+        try:
+            yield
+        except Suspend as e:
+            self.suspend(e)
+        except Resume as e:
+            raise Exception("Internal error.  Uncaught Resume") from e
+
+    def suspend(self, e: Suspend) -> NoReturn:
+        if e.status:
+            print(e.status)
+        with open(self.git.continuation, "w") as f:
+            ks = [k.to_json_dict() for k in reversed(e.continuations)]
+            j: Dict
+            j = {"continuations": ks}
+            j["tool"] = self.tool
+            if e.status:
+                j["status"] = e.status
+            json.dump(j, f, indent=True)
+            f.write("\n")
+        print(self.suspend_message)
+        sys.exit(2)
+
+    def reanimate(self, ks: List[Dict], *, throw: BaseException | None) -> None:
+        if not len(ks):
+            if throw is not None:
+                raise throw
+            else:
+                return
+        k, *ks = ks
+        T = ContinuationClass.types[k["kind"]]
+        del k["kind"]
+        with T(self.git, **k):
+            self.reanimate(ks, throw=throw)
+
+    def resume(self, throw: BaseException | None = None) -> NoReturn:
+
+        if not self.git.continuation.exists():
+            raise UserError(f"Error: no {self.tool} operation is in progress")
+
+        with open(self.git.continuation, "r") as f:
+            j = json.load(f)
+
+        if j["tool"] != self.tool:
+            raise UserError(f"A {j["tool"]} operation is currently in progress")
+
+        self.git.continuation.unlink()
+
+        try:
+            self.reanimate(j["continuations"], throw=throw)
+        except Suspend as e:
+            self.suspend(e)
+        except Resume as e:
+            raise Exception("Internal error.  Uncaught Resume") from e
+
+        sys.exit(0)
+
+    def status(self) -> None:
+        if not self.git.continuation.exists():
+            print("no operation in progress")
+            return
+        with open(self.git.continuation, "r") as f:
+            j = json.load(f)
+        if j["tool"] != self.tool:
+            raise UserError(f"{j["tool"]} operation is in progress, not {self.tool}")
+        print(j.get("status", "unknown"))
 
 
 class DeleteTempBranch(Continuation):
@@ -254,7 +267,7 @@ def CheckoutBaseline(git: Git, sha: str | None):
 
 class EditBranch(Continuation[str]):
     """
-    Detach from the current branch, so it can be edited without polluing
+    Detach from the current branch, so it can be edited without polluting
     the reflog with a bunch of intermediate steps.   At the end, update the
     branch using message, and check it back out again.
     """
@@ -310,8 +323,9 @@ class CherryPickContinue(Continuation):
     do it for them if they have't.
     """
 
-    def __init__(self, git: Git):
+    def __init__(self, git: Git, *, ref: str):
         super().__init__(git)
+        self.ref = ref
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -323,7 +337,7 @@ class CherryPickContinue(Continuation):
         if self.git.cherry_pick_in_progress:
             if self.git.has_unmerged_files():
                 print("The index still has unmerged files.")
-                raise Suspend("Resolve conflicts and retry with --continue")
+                raise Suspend(status=f"cherry-picking {self.ref}")
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
@@ -333,10 +347,8 @@ def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
         git.cmd(["git", "cherry-pick", "--allow-empty", ref])
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
-            with CherryPickContinue(git):
-                suspend = Suspend("Resolve conflicts and retry with --continue")
-                suspend.status = f"cherry-picking {ref}"
-                raise suspend
+            with CherryPickContinue(git, ref=ref):
+                raise Suspend(status=f"cherry-picking {ref}")
         else:
             git.cherry_pick_abort()
             raise

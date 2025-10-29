@@ -5,7 +5,8 @@ from pathlib import Path
 
 from .git import Git, Commit, GitFailed, UserError
 from .queue import QueueFile, Baseline
-from .continuations import EditBranch, Continuation, PickCherries
+from .continuations import EditBranch, PickCherries
+from . import continuations
 
 
 def message(m: str, title: str | None):
@@ -95,17 +96,11 @@ class Queue:
             yield commit
 
     def rebase(self) -> None:
-
-        if not self.git.is_clean():
-            raise UserError("Error: repo not clean")
-
         patches = list(self.find_patches())
         self.q.baselines = [refresh_baseline(b, git=self.git) for b in self.q.baselines]
-
-        with Continuation.main(self.git, tool="git-queue"):
-            with EditBranch(self.git, message="git-queue rebase"):
-                with PickCherries(self.git, cherries=[b.sha for b in patches], edit=True):
-                    self.merge_baselines()
+        with EditBranch(self.git, message="git-queue rebase"):
+            with PickCherries(self.git, cherries=[b.sha for b in patches], edit=True):
+                self.merge_baselines()
 
 
 def parse_baseline(ref: str, *, git: Git) -> Baseline:
@@ -139,51 +134,59 @@ def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
         return Baseline(git.commit(baseline.ref).sha, baseline.ref, None)
 
 
-def main():
-    parser = argparse.ArgumentParser("git-queue", description="manage a bunch of patches")
-    subs = parser.add_subparsers(dest="command")
+class Main(continuations.Main):
 
-    init_parser = subs.add_parser("init", help="initialize a queue")
-    init_parser.add_argument("baseline", action="extend", nargs="+")
-    init_parser.add_argument("--title")
+    tool = "git-queue"
+    suspend_message = "Suspended! Resolve conflicts and resume with `git queue continue`"
 
-    subs.add_parser("rebase", help="rebase queue onto baselines")
-    subs.add_parser("tidy", help="normalize .git-queue file")
-    subs.add_parser("status")
-    subs.add_parser("continue")
+    def main(self) -> None:
+        parser = argparse.ArgumentParser("git-queue", description="manage a bunch of patches")
+        subs = parser.add_subparsers(dest="command")
 
-    args = parser.parse_args()
-    if args.command is None:
-        parser.print_usage()
+        init_parser = subs.add_parser("init", help="initialize a queue")
+        init_parser.add_argument("baseline", action="extend", nargs="+")
+        init_parser.add_argument("--title")
 
-    git = Git()
-    queuefile = git.directory / Queue.queuefile_name
+        subs.add_parser("rebase", help="rebase queue onto baselines")
+        subs.add_parser("tidy", help="normalize .git-queue file")
+        subs.add_parser("status")
+        subs.add_parser("continue")
 
-    if args.command == "tidy":
-        if queuefile.exists():
-            with open(queuefile, "r") as f:
-                q = QueueFile.load(f)
-            with open(queuefile, "w") as f:
-                q.dump(f)
+        args = parser.parse_args()
+        if args.command is None:
+            parser.print_usage()
 
-    if args.command == "init":
-        if not git.is_clean():
-            raise UserError("Error: repo not clean")
-        baselines = [parse_baseline(ref, git=git) for ref in args.baseline]
-        q = QueueFile(baselines=list(baselines), title=args.title)
-        with open(queuefile, "w") as f:
-            q.dump(f)
-        Queue(git).init()
+        if args.command == "status":
+            self.status()
+            return
 
-    if args.command == "rebase":
-        Queue(git).rebase()
+        if args.command == "continue":
+            self.resume(None)
+            return
 
-    if args.command == "status":
-        Continuation.status(git, tool="git-queue")
+        queuefile = self.git.directory / Queue.queuefile_name
 
-    if args.command == "continue":
-        Continuation.resume(git, tool="git-queue")
+        if args.command == "tidy":
+            if queuefile.exists():
+                with open(queuefile, "r") as f:
+                    q = QueueFile.load(f)
+                with open(queuefile, "w") as f:
+                    q.dump(f)
 
+        with self.setup():
+
+            if args.command == "init":
+                baselines = [parse_baseline(ref, git=self.git) for ref in args.baseline]
+                q = QueueFile(baselines=list(baselines), title=args.title)
+                with open(queuefile, "w") as f:
+                    q.dump(f)
+                Queue(self.git).init()
+
+            if args.command == "rebase":
+                Queue(self.git).rebase()
+
+
+main = Main()
 
 if __name__ == "__main__":
     main()

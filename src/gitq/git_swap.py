@@ -3,7 +3,7 @@
 import os
 import sys
 from contextlib import contextmanager
-from typing import List, Optional, Iterator, TypeVar
+from typing import List, Optional, Iterator, TypeVar, NoReturn
 import argparse
 from textwrap import dedent
 
@@ -17,6 +17,7 @@ from .continuations import (
     Resume,
     Suspend,
 )
+from . import continuations
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 
 T = TypeVar("T")
@@ -276,108 +277,118 @@ def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str]) -> Non
         swap(edit=edit, git=git, baselines=baselines)
 
 
-def main() -> None:
+class Main(continuations.Main):
 
-    parser = argparse.ArgumentParser(description="swap the order of commits")
-    parser.add_argument(
-        "--keep-going",
-        "-k",
-        action="store_true",
-        help="push COMMIT as far down (or up) the stack as it will go",
-    )
-    parser.add_argument(
-        "--continue",
-        "-c",
-        action="store_true",
-        dest="resume",
-        help="resume after conflicts have been resolved",
-    )
-    parser.add_argument(
-        "--up", action="store_true", help="swap the given commit with the one above it"
-    )
-    parser.add_argument(
-        "--abort", action="store_true", help="give up and restore git to original state"
-    )
-    parser.add_argument(
-        "--stop", action="store_true", help="abandon the latest swap operation, and continue"
-    )
-    parser.add_argument(
-        "--squash", action="store_true", help="squash instead of completing this swap"
-    )
-    parser.add_argument(
-        "--fixup", action="store_true", help="fixup instead of completing this swap"
-    )
-    parser.add_argument(
-        "--edit",
-        "-e",
-        action="store_true",
-        help="if conflicts arise, suspend so the user can resolve them",
-    )
-    parser.add_argument("--status", action="store_true", help="print status")
-    parser.add_argument(
-        "commit", nargs="?", metavar="COMMIT", help="swap COMMIT with COMMIT^. defaults to HEAD"
-    )
-    args = parser.parse_args()
+    tool = "git-swap"
+    suspend_message = "Suspended! Resolve conflicts and resume with `git swap --continue`"
 
-    modeargs = (args.resume, args.abort, args.stop, args.squash, args.fixup, args.status)
-    if sum(bool(x) for x in modeargs) > 1:
-        parser.error("use only one of --continue, --abort, --stop, --status, or --squash")
+    def __call__(self) -> NoReturn:
+        try:
+            super().__call__()
+            sys.exit(1)
+        except SwapFailed as e:
+            print(e)
+            sys.exit(1)
 
-    try:
-        git = Git()
+    def main(self) -> None:
+
+        parser = argparse.ArgumentParser(description="swap the order of commits")
+        parser.add_argument(
+            "--keep-going",
+            "-k",
+            action="store_true",
+            help="push COMMIT as far down (or up) the stack as it will go",
+        )
+        parser.add_argument(
+            "--continue",
+            "-c",
+            action="store_true",
+            dest="resume",
+            help="resume after conflicts have been resolved",
+        )
+        parser.add_argument(
+            "--up", action="store_true", help="swap the given commit with the one above it"
+        )
+        parser.add_argument(
+            "--abort", action="store_true", help="give up and restore git to original state"
+        )
+        parser.add_argument(
+            "--stop", action="store_true", help="abandon the latest swap operation, and continue"
+        )
+        parser.add_argument(
+            "--squash", action="store_true", help="squash instead of completing this swap"
+        )
+        parser.add_argument(
+            "--fixup", action="store_true", help="fixup instead of completing this swap"
+        )
+        parser.add_argument(
+            "--edit",
+            "-e",
+            action="store_true",
+            help="if conflicts arise, suspend so the user can resolve them",
+        )
+        parser.add_argument("--status", action="store_true", help="print status")
+        parser.add_argument(
+            "commit",
+            nargs="?",
+            metavar="COMMIT",
+            help="swap COMMIT with COMMIT^. defaults to HEAD",
+        )
+        args = parser.parse_args()
+
+        mode_args = (args.resume, args.abort, args.stop, args.squash, args.fixup, args.status)
+        if sum(bool(x) for x in mode_args) > 1:
+            parser.error("use only one of --continue, --abort, --stop, --status, or --squash")
 
         if args.status:
-            Continuation.status(git, tool="git-swap")
+            self.status()
             return
 
         if args.resume or args.abort or args.stop or args.squash or args.fixup:
-            throw: BaseException | None = None
+            resume: BaseException | None = None
             if args.abort:
-                throw = Abort()
+                resume = Abort()
             elif args.stop:
-                throw = Stop()
+                resume = Stop()
             elif args.squash:
-                throw = Squash()
+                resume = Squash()
             elif args.fixup:
-                throw = Fixup()
-            Continuation.resume(git, throw=throw, tool="git-swap")
+                resume = Fixup()
+            self.resume(resume)
             return
 
-        if git.continuation.exists():
-            raise UserError("Error: git swap operation is already in progress")
-
-        if not git.is_clean():
-            raise UserError("Error: repo not clean")
-
-        with Continuation.main(git, tool="git-swap"):
-            with EditBranch(git, message="git-swap") as branch:
-                if not args.up:
-                    baselines = git.baselines(branch)
-                    commit = git.commit(args.commit) if args.commit else None
-                    with edit_commit(commit, git=git):
-                        with maybe_keep_going(
-                            args.keep_going, git=git, edit=args.edit, baselines=baselines
-                        ):
-                            swap_or_squash(edit=args.edit, git=git, baselines=baselines)
+        with self.setup():
+            with EditBranch(self.git, message="git-swap") as branch:
+                if args.up:
+                    self.swap_up(args)
                 else:
-                    if not args.commit:
-                        raise UserError("specify a commit")
-                    commit = git.commit(args.commit)
-                    cherries = collect_cherries(commit, git=git)
-                    if not cherries:
-                        raise UserError("commit is already at HEAD")
-                    with CatchStop(git):
-                        if args.keep_going:
-                            with KeepGoingUp(git=git, edit=args.edit, cherries=cherries):
-                                git.checkout(commit.sha)
-                        else:
-                            with edit_commit(git.commit(cherries[0]), git=git):
-                                swap_or_squash(edit=args.edit, git=git, baselines=[])
+                    self.swap_down(args, self.git.baselines(branch))
 
-    except (SwapFailed, UserError) as e:
-        print(e)
-        sys.exit(1)
+    def swap_down(self, args, baselines: List[str]) -> None:
+        commit = self.git.commit(args.commit) if args.commit else None
+        with edit_commit(commit, git=self.git):
+            with maybe_keep_going(
+                args.keep_going, git=self.git, edit=args.edit, baselines=baselines
+            ):
+                swap_or_squash(edit=args.edit, git=self.git, baselines=baselines)
 
+    def swap_up(self, args) -> None:
+        if not args.commit:
+            raise UserError("specify a commit")
+        commit = self.git.commit(args.commit)
+        cherries = collect_cherries(commit, git=self.git)
+        if not cherries:
+            raise UserError("commit is already at HEAD")
+        with CatchStop(self.git):
+            if args.keep_going:
+                with KeepGoingUp(git=self.git, edit=args.edit, cherries=cherries):
+                    self.git.checkout(commit.sha)
+            else:
+                with edit_commit(self.git.commit(cherries[0]), git=self.git):
+                    swap_or_squash(edit=args.edit, git=self.git, baselines=[])
+
+
+main = Main()
 
 if __name__ == "__main__":
     main()
