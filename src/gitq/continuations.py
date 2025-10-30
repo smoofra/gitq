@@ -82,6 +82,8 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
     manager: ContextManager[T]
     git: Git
 
+    __slots__ = ["manager", "git", "__dict__"]
+
     def __init__(self, git: Git) -> None:
         self.git = git
 
@@ -107,12 +109,8 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
     def impl(self) -> ContextManager[T]:
         pass
 
-    def to_json_dict(self) -> Dict:
-        j = self.__dict__
-        j["kind"] = self.__class__.__name__
-        del j["git"]
-        del j["manager"]
-        return j
+    def to_json(self) -> List:
+        return [self.__class__.__name__, self.__dict__]
 
 
 class Main:
@@ -154,9 +152,9 @@ class Main:
         if e.status:
             print(e.status)
         with open(self.git.continuation, "w") as f:
-            ks = [k.to_json_dict() for k in reversed(e.continuations)]
+            continuations = [k.to_json() for k in reversed(e.continuations)]
             j: Dict
-            j = {"continuations": ks}
+            j = {"continuations": continuations}
             j["tool"] = self.tool
             if e.status:
                 j["status"] = e.status
@@ -165,17 +163,17 @@ class Main:
         print(self.suspend_message)
         sys.exit(2)
 
-    def reanimate(self, ks: List[Dict], *, throw: BaseException | None) -> None:
-        if not len(ks):
+    def reanimate(self, continuations: List[Dict], *, throw: BaseException | None) -> None:
+        if not len(continuations):
             if throw is not None:
                 raise throw
             else:
                 return
-        k, *ks = ks
-        T = ContinuationClass.types[k["kind"]]
-        del k["kind"]
-        with T(self.git, **k):
-            self.reanimate(ks, throw=throw)
+        continuation, *continuations = continuations
+        kind, args = continuation
+        T = ContinuationClass.types[kind]
+        with T(self.git, **args):
+            self.reanimate(continuations, throw=throw)
 
     def resume(self, throw: BaseException | None = None) -> NoReturn:
 
