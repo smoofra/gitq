@@ -101,7 +101,7 @@ class Git:
         if not interactive:
             kw["stdin"] = FNULL
             kw["stdout"] = subprocess.PIPE
-            kw["stderr"] = subprocess.PIPE
+        kw["stderr"] = subprocess.PIPE
         proc = subprocess.Popen(cmd, cwd=self.directory, encoding="utf8", **kw)
         (out, err) = proc.communicate()
         err, _ = re.subn(r"^", "\t", err.strip(), flags=re.MULTILINE)

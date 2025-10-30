@@ -108,8 +108,9 @@ class OrSquash(Continuation):
                     f.write(B.message)
                     f.write("\n\n")
                     f.write(A.message)
-                self.git.cmd(["git", "commit", "--allow-empty", "--edit", "-F", message], env=env)
-                self.git.cmd(["git", "reset", "--hard", "HEAD"])
+                cmd = ["git", "commit", "--allow-empty", "--edit", "-F", message]
+                self.git.cmd(cmd, env=env, interactive=True)
+                self.git("reset", "--hard", "HEAD")
             raise Stop
         except Stop:
             raise  # handled by KeepGoing
