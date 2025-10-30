@@ -210,25 +210,44 @@ class Main:
         print(j.get("status", f"{j["tool"]} operation is in progress"))
 
 
-class DeleteTempBranch(Continuation):
+class Finally(Continuation):
+    "This should be used instead of try/finally for continuation classes."
 
-    def __init__(self, git: Git, branch: str, previous_head: str):
-        super().__init__(git)
-        self.branch = branch
-        self.previous_head = previous_head
+    @abstractmethod
+    def cleanup(self) -> None:
+        pass
 
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
             yield
-        finally:
-            if self.git.on_orphan_branch():
-                print(f"# reset back to before creating {self.branch} branch")
-                self.git.force_checkout(self.previous_head)
-            else:
-                self.git.detach()
-            if self.git.branch_exists(self.branch):
-                self.git.cmd(["git", "branch", "-qD", self.branch])
+        except GeneratorExit:
+            raise
+        except (Exception, Resume):
+            self.cleanup()
+            raise
+        except BaseException as e:
+            self.cleanup()
+            raise Exception(f"Unexpected BaseException: {repr(e)}")
+        else:
+            self.cleanup()
+
+
+class DeleteTempBranch(Finally):
+
+    def __init__(self, git: Git, *, branch: str, previous_head: str):
+        super().__init__(git)
+        self.branch = branch
+        self.previous_head = previous_head
+
+    def cleanup(self) -> None:
+        if self.git.on_orphan_branch():
+            print(f"# reset back to before creating {self.branch} branch")
+            self.git.force_checkout(self.previous_head)
+        else:
+            self.git.detach()
+        if self.git.branch_exists(self.branch):
+            self.git.cmd(["git", "branch", "-qD", self.branch])
 
 
 @contextmanager
