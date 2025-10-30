@@ -61,6 +61,9 @@ class Git(Directory, gitq.git.Git):
         lines = self("ls-files", "-u").splitlines()
         return {line.split("\t", 1)[1] for line in lines}
 
+    def others(self) -> set[str]:
+        return set(self("ls-files", "--others").splitlines())
+
     @property
     def q(self):
         return Queue(self).q

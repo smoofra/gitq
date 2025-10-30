@@ -628,3 +628,22 @@ def test_resume_middle_up(repo: Git):
 
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcDdefg"
+
+
+def test_deleted(repo: Git):
+
+    repo.w("a", "a")
+    repo.s("git add . && git commit -m a")
+
+    repo.s("git rm a && git commit -m A")
+
+    repo.w("b", "b")
+    repo.s("git add . && git commit -m b")
+
+    sha = repo.rev_parse("HEAD")
+    assert "".join(repo.log()) == "aAb"
+
+    repo.s("git swap")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert "".join(repo.log()) == "abA"
+    assert not repo.others()

@@ -65,9 +65,12 @@ class PickCherryWithReference(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        self.git.cmd(["git", "read-tree", self.reference])
-        self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", self.cherry])
-        self.git.cmd(["git", "reset", "--hard", "HEAD"])
+        deleted = self.git("diff", "--diff-filter=A", "--name-only", self.reference).splitlines()
+        self.git("read-tree", self.reference)
+        self.git("commit", "--allow-empty", "--reuse-message", self.cherry)
+        for rel in deleted:
+            (self.git.directory / rel).unlink()
+        self.git("reset", "--hard", "HEAD")
 
 
 # Handle the case when the user calls `git swap --squash`, etc..
