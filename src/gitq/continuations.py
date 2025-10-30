@@ -207,7 +207,7 @@ class Main:
             j = json.load(f)
         if j["tool"] != self.tool:
             raise UserError(f"{j["tool"]} operation is in progress, not {self.tool}")
-        print(j.get("status", "unknown"))
+        print(j.get("status", f"{j["tool"]} operation is in progress"))
 
 
 class DeleteTempBranch(Continuation):

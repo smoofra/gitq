@@ -232,13 +232,13 @@ def collect_cherries(commit: Optional[Commit], *, git: Git) -> List[str]:
 
 # move HEAD to the specified commit, yield, then cherry-pick everything above it
 @contextmanager
-def edit_commit(commit: Optional[Commit], *, git: Git):
+def edit_commit(commit: Optional[Commit], *, git: Git, edit: bool = False):
     if not commit:
         yield
         return
     cherries = collect_cherries(commit, git=git)
     git.checkout(commit.sha)
-    with PickCherries(git, cherries=cherries):
+    with PickCherries(git, cherries=cherries, edit=edit):
         yield
 
 
