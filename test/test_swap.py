@@ -57,7 +57,7 @@ def test_resume(repo: Git):
     repo.s("git commit -q -m b")
     assert repo.log() == ["0", "a", "b"]
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap --edit")
+    repo.s("git swap --edit; [[ $? = 2 ]]")
     repo.w("a", "bbb")
     repo.s("git add -u")
     repo.s("git swap --continue")
@@ -74,7 +74,7 @@ def test_resume_root(repo: Git):
     repo.s("git commit -q -m b")
     assert repo.log() == ["a", "b"]
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap --edit")
+    repo.s("git swap --edit; [[ $? = 2 ]]")
     repo.w("a", "bbb")
     repo.s("git add -u")
     repo.s("git swap --continue")
@@ -208,7 +208,7 @@ def test_resume_middle(repo: Git):
         repo.s(f"git commit -q -m {c}")
 
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/D")
+    repo.s("git swap -e :/D; [[ $? = 2 ]]")
 
     repo.w("d", "D")
     repo.s("git add -u")
@@ -241,7 +241,7 @@ def test_resume_middle_fixup(repo: Git):
         repo.s(f"git commit -q -m {c}")
 
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/D")
+    repo.s("git swap -e :/D; [[ $? = 2 ]]")
     repo.s("git swap --fixup")
 
     assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
@@ -268,7 +268,7 @@ def test_resume_fixup(repo: Git):
 
     assert "".join(repo.log()) == "abBc"
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/B")
+    repo.s("git swap -e :/B; [[ $? = 2 ]]")
     repo.s("git swap --fixup")
     assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
@@ -305,7 +305,7 @@ def test_resume_squash(repo: Git):
 
     assert "".join(repo.log()) == "abBc"
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/B")
+    repo.s("git swap -e :/B; [[ $? = 2 ]]")
     repo.s("EDITOR=true git swap --squash")
     assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
@@ -344,7 +344,7 @@ def test_resume_fixup_root(repo: Git):
 
     assert "".join(repo.log()) == "aAbc"
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/A")
+    repo.s("git swap -e :/A; [[ $? = 2 ]]")
     repo.s("git swap --fixup")
     assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
@@ -370,7 +370,7 @@ def test_resume_squash_root(repo: Git):
 
     assert "".join(repo.log()) == "aAbc"
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e :/A")
+    repo.s("git swap -e :/A; [[ $? = 2 ]]")
     repo.s("EDITOR=true git swap --squash")
     assert repo.t(f"git diff --exit-code --quiet {sha} HEAD")
     assert "".join(repo.log()) == "abc"
@@ -388,7 +388,7 @@ def test_keep_going_stop(repo: Git):
     repo.s("git add .")
     repo.s("git commit -q -m B")
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap --keep-going -e")
+    repo.s("git swap --keep-going -e; [[ $? = 2 ]]")
     repo.s("git swap --stop")
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abBcdefg"
@@ -404,7 +404,7 @@ def test_keep_going_fixup(repo: Git):
     repo.s("git commit -q -m B")
     sha = repo.rev_parse("HEAD")
     assert "".join(repo.log()) == "abcdefgB"
-    repo.s("! git swap --keep-going -e")
+    repo.s("git swap --keep-going -e; [[ $? = 2 ]]")
     repo.s("git swap --fixup")
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcdefg"
@@ -420,7 +420,7 @@ def test_keep_going_squash(repo: Git):
     repo.s("git commit -q -m B")
     sha = repo.rev_parse("HEAD")
     assert "".join(repo.log()) == "abcdefgB"
-    repo.s("! git swap --keep-going -e")
+    repo.s("git swap --keep-going -e; [[ $? = 2 ]]")
     repo.s("EDITOR=true git swap --squash")
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abcdefg"
@@ -436,7 +436,7 @@ def test_keep_going_continue(repo: Git):
     repo.s("git commit -q -m C")
     sha = repo.rev_parse("HEAD")
     assert "".join(repo.log()) == "abcdefgC"
-    repo.s("! git swap --keep-going -e")
+    repo.s("git swap --keep-going -e; [[ $? = 2 ]]")
     repo.w("c", "C")
     repo.s("git add -u")
     repo.s("git swap --continue")
@@ -451,7 +451,7 @@ def test_swap_failed_root(repo: Git):
     repo.w("a", "A")
     repo.s("git add .")
     repo.s("git commit -q -m A")
-    repo.s("! git swap")
+    repo.s("git swap; [[ $? = 1 ]]")
     assert "".join(repo.log()) == "aA"
 
 
@@ -465,8 +465,8 @@ def test_resume_twice(repo: Git):
     repo.s("git commit -q -m b")
     assert repo.log() == ["0", "a", "b"]
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap --edit")
-    repo.s("! git swap --continue")
+    repo.s("git swap --edit; [[ $? = 2 ]]")
+    repo.s("git swap --continue; [[ $? = 2 ]]")
     repo.w("a", "b")
     repo.s("git add -u")
     repo.s("git swap --continue")
@@ -487,13 +487,13 @@ def test_keep_going_resume_twice(repo: Git):
     repo.s("git commit -q -m z")
 
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap --keep-going --edit")
+    repo.s("git swap --keep-going --edit; [[ $? = 2 ]]")
 
     assert repo.unmerged_files() == {"d"}
     repo.w("d", "z")
     repo.s("git add d")
 
-    repo.s("! git swap --continue")
+    repo.s("git swap --continue; [[ $? = 2 ]]")
 
     assert repo.unmerged_files() == {"a"}
     repo.w("a", "z")
@@ -577,7 +577,7 @@ def test_keep_going_up_fixup(repo: Git):
     assert "".join(repo.log()) == "abcdAefg"
     sha = repo.rev_parse("HEAD")
 
-    repo.s("! git swap --keep-going --up --edit :/a")
+    repo.s("git swap --keep-going --up --edit :/a; [[ $? = 2 ]]")
 
     repo.s("git swap --fixup")
 
@@ -620,7 +620,7 @@ def test_resume_middle_up(repo: Git):
 
     assert "".join(repo.log()) == "abcdDefg"
     sha = repo.rev_parse("HEAD")
-    repo.s("! git swap -e --up :/d")
+    repo.s("git swap -e --up :/d; [[ $? = 2 ]]")
 
     repo.w("d", "D")
     repo.s("git add -u")

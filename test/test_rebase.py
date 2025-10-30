@@ -116,12 +116,12 @@ def test_rebase_conflict(repo: Git):
     repo.s("git checkout master")
     sha = repo.rev_parse("HEAD")
 
-    repo.s("! git queue rebase")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
     assert repo.unmerged() == {"b"}
 
     repo.w("b", "b")
     repo.s("git add b")
-    repo.s("! git queue continue")
+    repo.s("git queue continue; [[ $? = 2 ]]")
 
     assert repo.unmerged() == {"c"}
     repo.w("c", "c")
