@@ -5,7 +5,7 @@ import argparse
 
 from . import continuations
 from .continuations import EditBranch
-from .git_swap import edit_commit, OrSquash, Squash, Fixup, CatchStop
+from .git_swap import edit_commit, OrSquash, Squash, Fixup
 
 
 class Main(continuations.Main):
@@ -22,12 +22,11 @@ class Main(continuations.Main):
             commit = self.git.commit(args.commit)
             with EditBranch(self.git, message="git-squash"):
                 with edit_commit(commit, git=self.git):
-                    with CatchStop(self.git):
-                        with OrSquash(self.git, head=commit.sha):
-                            if args.fixup:
-                                raise Fixup
-                            else:
-                                raise Squash
+                    with OrSquash(self.git, head=commit.sha, stop=False):
+                        if args.fixup:
+                            raise Fixup
+                        else:
+                            raise Squash
 
 
 main = Main()
