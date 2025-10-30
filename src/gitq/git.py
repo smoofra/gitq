@@ -160,16 +160,6 @@ class Git:
     def continuation(self) -> Path:
         return self.gitdir / "continuation.json"
 
-    def baselines(self, branch: str) -> List[str]:
-        if not branch.startswith("refs/heads/"):
-            return list()
-        branch = branch.removeprefix("refs/heads/")
-        try:
-            baseline = self.cmd(["git", "config", f"branch.{branch}.baseline"], quiet=True).strip()
-        except GitFailed:
-            return list()
-        return [self.rev_parse(baseline)]
-
     def is_clean(self) -> bool:
         if self("diff-files", "--name-only", quiet=True):
             return False

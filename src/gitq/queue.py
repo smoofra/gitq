@@ -92,6 +92,10 @@ def from_this_tool(c: Commit) -> bool:
     return c.message.rstrip().endswith("\nTool: gitq")
 
 
+class NotAQueue(UserError):
+    pass
+
+
 class Queue:
 
     git: Git
@@ -106,7 +110,7 @@ class Queue:
     def __init__(self, git: Git):
         self.git = git
         if not self.queuefile_path.exists():
-            raise UserError("This branch is not a queue.")
+            raise NotAQueue("This branch is not a queue.")
         with open(self.queuefile_path, "r") as f:
             self.q = QueueFile.load(f)
 
@@ -165,6 +169,15 @@ class Queue:
             if changed == self.queuefile_name:
                 continue
             yield commit
+
+    def baselines_for_swap(self) -> Iterator[str]:
+        "return a list of shas that git-swap should not proceed past"
+        for b in self.q.baselines:
+            yield b.sha
+        commits = self.git.commits(*(f"^{b.sha}" for b in self.q.baselines), "HEAD", reverse=True)
+        for commit in commits:
+            if from_this_tool(commit):
+                yield commit.sha
 
     def rebase(self) -> None:
         patches = list(self.find_patches())

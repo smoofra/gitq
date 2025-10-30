@@ -19,6 +19,7 @@ from .continuations import (
 )
 from . import continuations
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
+from .queue import Queue, NotAQueue
 
 T = TypeVar("T")
 
@@ -358,11 +359,15 @@ class Main(continuations.Main):
             return
 
         with self.setup():
-            with EditBranch(self.git, message="git-swap") as branch:
+            with EditBranch(self.git, message="git-swap"):
                 if args.up:
                     self.swap_up(args)
                 else:
-                    self.swap_down(args, self.git.baselines(branch))
+                    try:
+                        baselines = list(Queue(self.git).baselines_for_swap())
+                    except NotAQueue:
+                        baselines = []
+                    self.swap_down(args, baselines)
 
     def swap_down(self, args, baselines: List[str]) -> None:
         commit = self.git.commit(args.commit) if args.commit else None
