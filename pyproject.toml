@@ -1,6 +1,6 @@
 [project]
 name = "gitq"
-version = "0.0.3"
+version = "0.0.4"
 description = "git based patch manager"
 authors = [
     {name = "Lawrence D'Anna",email = "larry@elder-gods.org"}
