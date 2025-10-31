@@ -65,12 +65,8 @@ class PickCherryWithReference(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        deleted = self.git("diff", "--diff-filter=A", "--name-only", self.reference).splitlines()
-        self.git("read-tree", self.reference)
+        self.git.checkout_tree(self.reference)
         self.git("commit", "--allow-empty", "--reuse-message", self.cherry)
-        for rel in deleted:
-            (self.git.directory / rel).unlink()
-        self.git("reset", "--hard", "HEAD")
 
 
 # Handle the case when the user calls `git swap --squash`, etc..
@@ -90,9 +86,8 @@ class OrSquash(Continuation):
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
             with CheckoutBaseline(self.git, C.sha if C else None):
-                self.git.cmd(["git", "read-tree", A.sha])
+                self.git.checkout_tree(A.sha)
                 self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
-                self.git.cmd(["git", "reset", "--hard", "HEAD"])
             if self.stop:
                 raise Stop
         except Squash:
@@ -100,7 +95,7 @@ class OrSquash(Continuation):
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
             with CheckoutBaseline(self.git, C.sha if C else None):
-                self.git.cmd(["git", "read-tree", A.sha])
+                self.git.checkout_tree(A.sha)
                 author = split_author(B.author)
                 env = dict(os.environ)
                 env.update(
@@ -117,7 +112,6 @@ class OrSquash(Continuation):
                     f.write(A.message)
                 cmd = ["git", "commit", "--allow-empty", "--edit", "-F", message]
                 self.git.cmd(cmd, env=env, interactive=True)
-                self.git("reset", "--hard", "HEAD")
             if self.stop:
                 raise Stop
         except Stop:

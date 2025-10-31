@@ -244,3 +244,11 @@ class Git:
     def is_conflicted(self, commit: Commit) -> bool:
         cmd = ["git", "merge-tree", "--name-only", *commit.parents]
         return self.cmd_test(cmd)
+
+    def checkout_tree(self, tree: str) -> None:
+        "replace index and working files with the specified tree"
+        deleted = self("diff", "--diff-filter=A", "--name-only", tree).splitlines()
+        self("read-tree", tree)
+        self("checkout", "--", ".")
+        for rel in deleted:
+            (self.directory / rel).unlink()
