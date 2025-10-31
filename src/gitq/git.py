@@ -10,7 +10,10 @@ FNULL = open(os.devnull, "w")
 
 
 class GitFailed(Exception):
-    pass
+
+    def __init__(self, messge: str, *, rc: int):
+        super().__init__(messge)
+        self.rc = rc
 
 
 class MergeFound(Exception):
@@ -106,7 +109,7 @@ class Git:
         (out, err) = proc.communicate()
         err, _ = re.subn(r"^", "\t", err.strip(), flags=re.MULTILINE)
         if proc.wait() != 0:
-            raise GitFailed(f"git failed:\n{err}")
+            raise GitFailed(f"git failed:\n{err}", rc=proc.wait())
         return out
 
     def __call__(self, *args, quiet: bool = False) -> str:
@@ -116,10 +119,9 @@ class Git:
         proc = subprocess.Popen(
             args, cwd=self.directory, stdin=FNULL, stdout=FNULL, stderr=FNULL, **kw
         )
-        code = proc.wait()
-        if code not in [0, 1]:
-            raise GitFailed("git failed")
-        return not code
+        if proc.wait() not in [0, 1]:
+            raise GitFailed("git failed", rc=proc.wait())
+        return not proc.wait()
 
     def rev_parse(self, commit: str) -> str:
         return self.cmd(["git", "rev-parse", commit], quiet=True).strip()
@@ -242,8 +244,13 @@ class Git:
         return None
 
     def is_conflicted(self, commit: Commit) -> bool:
-        cmd = ["git", "merge-tree", "--name-only", *commit.parents]
-        return self.cmd_test(cmd)
+        try:
+            tree = self("merge-tree", "--name-only", *commit.parents, quiet=True).strip()
+        except GitFailed as e:
+            if e.rc == 1:
+                return False
+            raise
+        return self.cmd_test(["git", "diff", "--quiet", commit.sha, tree, "--"])
 
     def checkout_tree(self, tree: str) -> None:
         "replace index and working files with the specified tree"
