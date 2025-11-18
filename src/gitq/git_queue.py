@@ -34,6 +34,7 @@ class Main(continuations.Main):
         init_parser = subs.add_parser("init", help="initialize a queue")
         init_parser.add_argument("baseline", action="extend", nargs="+")
         init_parser.add_argument("--title")
+        init_parser.add_argument("--branch", "-b")
 
         subs.add_parser("rebase", help="rebase queue onto baselines")
         subs.add_parser("tidy", help="normalize .git-queue file")
@@ -70,9 +71,11 @@ class Main(continuations.Main):
             if args.command == "init":
                 baselines = [parse_baseline(ref, git=self.git) for ref in args.baseline]
                 q = QueueFile(baselines=list(baselines), title=args.title)
-                with open(queuefile, "w") as f:
-                    q.dump(f)
-                Queue(self.git).init()
+                queue = Queue(self.git, q=q)
+                if args.branch:
+                    queue.init_new_branch(args.branch)
+                else:
+                    queue.init()
 
             if args.command == "rebase":
                 Queue(self.git).rebase()

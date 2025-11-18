@@ -107,14 +107,18 @@ class Queue:
     def queuefile_path(self) -> Path:
         return self.git.directory / self.queuefile_name
 
-    def __init__(self, git: Git):
+    def __init__(self, git: Git, *, q: QueueFile | None = None):
         self.git = git
-        if not self.queuefile_path.exists():
-            raise NotAQueue("This branch is not a queue.")
-        with open(self.queuefile_path, "r") as f:
-            self.q = QueueFile.load(f)
+        if q:
+            self.q = q
+        else:
+            if not self.queuefile_path.exists():
+                raise NotAQueue("This branch is not a queue.")
+            with open(self.queuefile_path, "r") as f:
+                self.q = QueueFile.load(f)
 
-    def save_queuefile(self):
+    def save_queuefile(self, *, amend: bool):
+        assert amend
         with open(self.queuefile_path, "w") as f:
             self.q.dump(f)
         self.git("add", self.queuefile_path)
@@ -125,33 +129,44 @@ class Queue:
         baseline, *baselines = self.q.baselines
         assert baseline.sha
 
-        if not baselines:
-            self.git.checkout(baseline.sha)
-            self.git("commit", "--allow-empty", "-m", message("baseline", self.q.title))
-            self.save_queuefile()
-            return self.git.commit("HEAD")
-
         self.git.checkout(baseline.sha)
+
+        if not baselines:
+            self.git("commit", "--allow-empty", "-m", message("baseline", self.q.title))
+            self.save_queuefile(amend=True)
+            return self.git.commit("HEAD")
 
         refs = [b.sha for b in baselines]
 
         try:
-            self.git("merge", *refs, "-m", message("merged baselines", self.q.title))
+            self.git("merge", "--no-ff", *refs, "-m", message("merged baselines", self.q.title))
         except GitFailed:
-            self.git("merge", "--abort")
+            if (self.git.gitdir / "MERGE_HEAD").exists():
+                self.git("merge", "--abort")
         else:
-            self.save_queuefile()
+            self.save_queuefile(amend=True)
             return self.git.commit("HEAD")
 
         for ref in refs:
-            self.git.cmd(["git", "merge", ref])
+            try:
+                self.git.cmd(["git", "merge", "--no-ff", ref])
+            except GitFailed:
+                if (self.git.gitdir / "MERGE_HEAD").exists():
+                    self.git("merge", "--abort")
+                raise
 
-        self.save_queuefile()
+        self.save_queuefile(amend=True)
         return self.git.commit("HEAD")
 
     def init(self):
-        self.git("add", self.queuefile_path)
-        self.git("commit", "-m", message("initialized queue", self.q.title))
+        self.git("commit", "--allow-empty", "-m", message("initialized queue", self.q.title))
+        self.save_queuefile(amend=True)
+
+    def init_new_branch(self, branch: str):
+        self.git.detach()
+        self.merge_baselines()
+        self.git("branch", branch, "HEAD")
+        self.git.checkout(branch)
 
     def find_patches(self) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
