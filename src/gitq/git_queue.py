@@ -3,7 +3,7 @@ import argparse
 
 from .git import Git
 from .queue import QueueFile, Baseline, Queue
-from .continuations import Abort
+from .continuations import Abort, UserError
 from . import continuations
 
 
@@ -32,15 +32,27 @@ class Main(continuations.Main):
         subs = parser.add_subparsers(dest="command")
 
         init_parser = subs.add_parser("init", help="initialize a queue")
-        init_parser.add_argument("baseline", action="extend", nargs="+")
+        init_parser.add_argument("baselines", action="extend", nargs="+", metavar="baseline")
         init_parser.add_argument("--title")
         init_parser.add_argument("--branch", "-b")
 
-        subs.add_parser("rebase", help="rebase queue onto baselines")
+        add_parser = subs.add_parser("add", help="add a baseline")
+        add_parser.add_argument("add", action="extend", nargs="+", metavar="baseline")
+
+        remove_parser = subs.add_parser("remove", help="remove a baseline")
+        remove_parser.add_argument("remove", action="extend", nargs="+", metavar="baseline")
+
+        rebase_parser = subs.add_parser("rebase", help="rebase queue onto baselines")
+        rebase_parser.add_argument("--add", metavar="baseline", action="append", default=[])
+        rebase_parser.add_argument("--remove", metavar="baseline", action="append", default=[])
+
         subs.add_parser("tidy", help="normalize .git-queue file")
+
         subs.add_parser("status")
         subs.add_parser("continue")
         subs.add_parser("abort")
+
+        # TODO add subcommand to add and remove baselines
 
         args = parser.parse_args()
         if args.command is None:
@@ -69,7 +81,7 @@ class Main(continuations.Main):
         with self.setup():
 
             if args.command == "init":
-                baselines = [parse_baseline(ref, git=self.git) for ref in args.baseline]
+                baselines = [parse_baseline(ref, git=self.git) for ref in args.baselines]
                 q = QueueFile(baselines=list(baselines), title=args.title)
                 queue = Queue(self.git, q=q)
                 if args.branch:
@@ -77,8 +89,23 @@ class Main(continuations.Main):
                 else:
                     queue.init()
 
-            if args.command == "rebase":
-                Queue(self.git).rebase()
+            if args.command in ("rebase", "add", "remove"):
+                queue = Queue(self.git)
+                onto = list(queue.q.baselines)
+
+                for baseline in getattr(args, "add", ()):
+                    onto.append(parse_baseline(baseline, git=self.git))
+
+                for baseline in getattr(args, "remove", ()):
+                    ref = self.git.symbolic_full_name(baseline)
+                    for i, baseline in enumerate(onto):
+                        if baseline.ref == ref:
+                            break
+                    else:
+                        raise UserError(f"{ref} not found in baselines")
+                    del onto[i]
+
+                queue.rebase(onto=onto)
 
 
 main = Main()

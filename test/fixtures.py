@@ -68,6 +68,15 @@ class Git(Directory, gitq.git.Git):
     def q(self):
         return Queue(self).q
 
+    def c(self, message: str, *, filename: str | None = None, content: str | None = None):
+        if filename is None:
+            filename = message
+        if content is None:
+            content = message
+        self.w(filename, content)
+        self("add", filename)
+        self("commit", "--allow-empty", "-m", message)
+
 
 @pytest.fixture(scope="function")
 def repo(tmp_path: Path) -> Git:

@@ -218,12 +218,14 @@ class Queue:
         [base] = bases
         return base
 
-    def rebase(self) -> None:
+    def rebase(self, onto: List[Baseline] | None = None) -> None:
         # TODO this  need to filter out patches that have been cherry
         # picked down in to baselines.   It should use git-cherry to make
         # this determination.
         old_baselines = self.q.baselines
-        self.q.baselines = [refresh_baseline(b, git=self.git) for b in self.q.baselines]
+        if onto is None:
+            onto = self.q.baselines
+        self.q.baselines = [refresh_baseline(b, git=self.git) for b in onto]
         with EditBranch(self.git, message="git-queue rebase") as branch:
             self.merge_baselines()
             patches = list(self.find_patches(branch, old_baselines, "HEAD"))
