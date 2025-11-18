@@ -131,3 +131,61 @@ def test_rebase_conflict(repo: Git):
     assert repo.log() == ["A", "baseline", "b", "c"]
     assert [b.sha for b in repo.q.baselines] == [base1]
     assert set(repo("diff", "--name-only", sha, "HEAD").splitlines()) == {"a", ".git-queue"}
+
+
+def test_rebase_cherry(repo: Git):
+    """
+    Test that rebase skips commits that have been cherry-picked down into
+    baseline.
+    """
+
+    repo.s("echo a >a && git add a && git commit -m a")
+    repo.s("git branch base HEAD")
+
+    repo.s("git queue init -b q base")
+
+    repo.s("echo b >b && git add b && git commit -m b")
+    assert repo.log() == ["a", "baseline", "b"]
+
+    repo.s("git checkout base")
+    repo.s("git cherry-pick q")
+
+    repo.s("git checkout q")
+
+    repo.s("echo d >d && git add d && git commit -m d")
+    assert repo.log() == ["a", "baseline", "b", "d"]
+
+    repo.s("git queue rebase")
+    assert repo.log() == ["a", "b", "baseline", "d"]
+
+
+def test_rebase2_cherry(repo: Git):
+    """
+    Test that rebase skips commits that have been cherry-picked down into
+    one of the baselines.
+    """
+
+    repo.s("git commit --allow-empty -m 0")
+
+    repo.s("git checkout -b base-a")
+    repo.s("echo a >a && git add a && git commit -m a")
+
+    repo.s("git checkout master -b base-b")
+    repo.s("echo b >b && git add b && git commit -m b")
+
+    repo.s("git queue init -b q base-a base-b")
+
+    repo.s("echo c >c && git add c && git commit -m c")
+    assert repo.log() == ["0", "a", "b", "merged baselines", "c"]
+
+    repo.s("git checkout base-a")
+    repo.s("git cherry-pick q")
+
+    repo.s("git checkout q")
+
+    repo.s("echo d >d && git add d && git commit -m d")
+    assert repo.log() == ["0", "a", "b", "merged baselines", "c", "d"]
+
+    repo.s("git queue rebase")
+
+    assert repo.log() == ["0", "a", "c", "b", "merged baselines", "d"]

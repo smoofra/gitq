@@ -168,11 +168,26 @@ class Queue:
         self.git("branch", branch, "HEAD")
         self.git.checkout(branch)
 
-    def find_patches(self) -> Iterator[Commit]:
+    def duplicates(self, branch: str, base: str, new_base: str) -> Iterator[str]:
+        """
+        Yield commits in base..branch which are cherry-picked into new_base
+        """
+        for line in self.git("cherry", new_base, branch, base).strip().splitlines():
+            sign, sha = line.split(" ", 1)
+            if sign == "-":
+                yield sha
+
+    def find_patches(
+        self, branch: str, baselines: List[Baseline], new_base: str
+    ) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
             return
-        commits = self.git.commits(*(f"^{b.sha}" for b in self.q.baselines), "HEAD", reverse=True)
+        commits = self.git.commits(*(f"^{b.sha}" for b in baselines), branch, reverse=True)
+        base = self.find_baseline(commits)
+        dups = set(self.duplicates(branch, base, new_base))
         for commit in commits:
+            if commit.sha in dups:
+                continue
             if from_this_tool(commit):
                 continue
             if commit.is_merge:
@@ -194,12 +209,26 @@ class Queue:
             if from_this_tool(commit):
                 yield commit.sha
 
+    def find_baseline(self, commits: List[Commit]) -> str:
+        merges = [c.sha for c in commits if from_this_tool(c)]
+        bases = self.git("merge-base", "--independent", *merges).strip().splitlines()
+        if len(bases) > 1:
+            # TODO make a throwaway merge here
+            raise NotImplementedError
+        [base] = bases
+        return base
+
     def rebase(self) -> None:
-        patches = list(self.find_patches())
+        # TODO this  need to filter out patches that have been cherry
+        # picked down in to baselines.   It should use git-cherry to make
+        # this determination.
+        old_baselines = self.q.baselines
         self.q.baselines = [refresh_baseline(b, git=self.git) for b in self.q.baselines]
-        with EditBranch(self.git, message="git-queue rebase"):
+        with EditBranch(self.git, message="git-queue rebase") as branch:
+            self.merge_baselines()
+            patches = list(self.find_patches(branch, old_baselines, "HEAD"))
             with PickCherries(self.git, cherries=[b.sha for b in patches], edit=True):
-                self.merge_baselines()
+                pass
 
 
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
