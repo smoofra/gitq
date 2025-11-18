@@ -3,6 +3,7 @@ import argparse
 
 from .git import Git
 from .queue import QueueFile, Baseline, Queue
+from .continuations import Abort
 from . import continuations
 
 
@@ -38,6 +39,7 @@ class Main(continuations.Main):
         subs.add_parser("tidy", help="normalize .git-queue file")
         subs.add_parser("status")
         subs.add_parser("continue")
+        subs.add_parser("abort")
 
         args = parser.parse_args()
         if args.command is None:
@@ -50,6 +52,9 @@ class Main(continuations.Main):
         if args.command == "continue":
             self.resume(None)
             return
+
+        if args.command == "abort":
+            self.resume(Abort())
 
         queuefile = self.git.directory / Queue.queuefile_name
 

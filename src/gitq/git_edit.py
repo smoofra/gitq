@@ -4,7 +4,7 @@ import sys
 import argparse
 
 from . import continuations
-from .continuations import EditBranch, Suspend
+from .continuations import EditBranch, Suspend, Abort
 from .git_swap import edit_commit
 
 
@@ -23,12 +23,19 @@ class Main(continuations.Main):
             dest="resume",
             help="resume edits have been made",
         )
+        parser.add_argument(
+            "--abort",
+            action="store_true",
+        )
         parser.add_argument("--status", action="store_true", help="print status")
         args = parser.parse_args()
 
         if args.resume:
             self.resume(None)
             return
+
+        if args.abort:
+            self.resume(Abort())
 
         if args.status:
             self.status()
