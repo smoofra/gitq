@@ -101,14 +101,17 @@ class Git:
     def cmd(self, cmd, *, quiet: bool = False, interactive: bool = False, **kw) -> str:
         if not quiet:
             self.log_cmd(cmd)
-        if not interactive:
+        if interactive:
+            kw["stderr"] = subprocess.PIPE
+        else:
             kw["stdin"] = FNULL
             kw["stdout"] = subprocess.PIPE
-        kw["stderr"] = subprocess.PIPE
+            kw["stderr"] = subprocess.STDOUT
         proc = subprocess.Popen(cmd, cwd=self.directory, encoding="utf8", **kw)
         (out, err) = proc.communicate()
-        err, _ = re.subn(r"^", "\t", err.strip(), flags=re.MULTILINE)
         if proc.wait() != 0:
+            err = ((out or "") + (err or "")).strip()
+            err, _ = re.subn(r"^", "\t", err, flags=re.MULTILINE)
             raise GitFailed(f"git failed:\n{err}", rc=proc.wait())
         return out
 
