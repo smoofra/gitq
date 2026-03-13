@@ -233,6 +233,8 @@ class Queue:
                 pass
 
 
+# TODO  check if baseline branches are queues that themselves need refresh
+
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
     if baseline.ref is None:
         return baseline
