@@ -13,8 +13,8 @@ def test_yaml_round_trip():
     y = """
         continuations:
         - !EditBranch
-          head: refs/heads/main
           message: test
+          head: refs/heads/main
         tool: rebase
         status: cherry-picking abc123
     """

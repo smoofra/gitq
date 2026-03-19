@@ -5,8 +5,9 @@ from pathlib import Path
 
 import yaml
 
-from .git import Git, Commit, GitFailed, UserError
-from .continuations import EditBranch, PickCherries
+from .git import Git, Commit, GitFailed, UserError, contextGit
+from .continuations import EditBranch, PickCherries, Step, Then, CheckoutBranch
+from .continuations import Loader as ContinuationsLoader, Dumper as ContinuationsDumper
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -30,8 +31,9 @@ class Baseline(YAMLObject):
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
 yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
 
-# yaml.add_path_resolver("!QueueFile", [], Loader=Loader)
-# yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader)
+# Baseline can appear in continuation files (e.g. as RebaseOne.onto), so register it there too.
+ContinuationsLoader.add_constructor(Baseline.yaml_tag, Baseline.from_yaml)
+ContinuationsDumper.add_representer(Baseline, Baseline.to_yaml)
 
 
 @dataclass
@@ -198,19 +200,84 @@ class Queue:
         [base] = bases
         return base
 
+    # TODO check first if the baseline branches themselves are queues
+    # managed by this tool.  If they are, check if they need to be rebased
+    # first.   If so, rebase them.   Remember, rebasing can suspend, so the
+    # sequence of operations must be implemented using continuation
+    # abstractions, not just a regular python function.   Hopefully Then
+    # and Step can be used for this.
+    #
+    # This is probably best implemented with a planing phase first in
+    # regular python, which generates a series of operations that can be
+    # sequenced using Then.
+
     def rebase(self, onto: List[Baseline] | None = None) -> None:
-        old_baselines = self.q.baselines
-        if onto is None:
-            onto = self.q.baselines
-        self.q.baselines = [refresh_baseline(b, git=self.git) for b in onto]
+        Rebase(onto).run()
+
+    @classmethod
+    def needs_rebase(cls, ref: str | None) -> bool:
+        """Return True if the local queue branch at ref has baselines that have been updated."""
+        if ref is None or not ref.startswith("refs/heads/"):
+            return False
+        git = contextGit.get()
+        try:
+            content = git("show", f"{ref}:{cls.queuefile_name}", quiet=True)
+        except GitFailed:
+            return False
+        qf = QueueFile.loads(content)
+        for b in qf.baselines:
+            if refresh_baseline(b, git=git).sha != b.sha:
+                return True
+        return False
+
+
+@dataclass
+class RebaseBranch(Step):
+    ref: str
+
+    def run(self):
+        with CheckoutBranch(self.ref):
+            Rebase().run()
+
+
+@dataclass
+class RebaseOne(Step):
+
+    onto: List[Baseline] | None
+
+    def run(self):
+        q = Queue(self.git)
+
+        old_baselines = q.q.baselines
+        if self.onto is None:
+            self.onto = q.q.baselines
+
+        q.q.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
         with EditBranch(message="git-queue rebase") as branch:
-            self.merge_baselines()
-            patches = list(self.find_patches(branch, old_baselines, "HEAD"))
+            q.merge_baselines()
+            patches = list(q.find_patches(branch, old_baselines, "HEAD"))
             with PickCherries(cherries=[b.sha for b in patches], edit=True):
                 pass
 
 
-# TODO  check if baseline branches are queues that themselves need refresh
+@dataclass
+class Rebase(Step):
+
+    onto: None | List[Baseline] = field(default=None)
+
+    def run(self) -> None:
+        steps: List[Step] = list()
+
+        q = Queue(self.git)
+        for b in q.q.baselines:
+            if q.needs_rebase(b.ref):
+                assert b.ref
+                steps.append(RebaseBranch(b.ref))
+
+        steps.append(RebaseOne(onto=self.onto))
+
+        with Then(steps=steps):
+            pass
 
 
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:

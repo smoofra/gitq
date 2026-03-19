@@ -159,6 +159,113 @@ def test_rebase_cherry(repo: Git):
     assert repo.log() == ["a", "b", "baseline", "d"]
 
 
+def test_recursive_rebase(repo: Git):
+    """
+    When bar's baseline is foo (a local queue branch), rebasing bar should
+    rebase foo first, then rebase bar on top of the updated foo.
+    """
+    repo.c("0")
+
+    # Create base branch and foo as a queue on it
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b foo base")
+    repo.c("foo1")
+    repo.c("foo2")
+    assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2"]
+
+    # Create bar as a queue with foo as its baseline
+    repo.s("git queue init -b bar foo")
+    repo.c("bar1")
+    repo.c("bar2")
+    assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2", "baseline", "bar1", "bar2"]
+
+    # Update base so foo (and transitively bar) is out of date
+    repo.s("git checkout base")
+    repo.c("base2")
+
+    # Rebase bar — should rebase foo first, then bar
+    repo.s("git checkout bar")
+
+    repo.s("git queue rebase")
+
+    # foo should have been rebased to include base2
+    repo.s("git checkout foo")
+    assert repo.log() == ["0", "base1", "base2", "baseline", "foo1", "foo2"]
+
+    # bar should have been rebased onto the new foo
+    repo.s("git checkout bar")
+    assert repo.log() == [
+        "0",
+        "base1",
+        "base2",
+        "baseline",
+        "foo1",
+        "foo2",
+        "baseline",
+        "bar1",
+        "bar2",
+    ]
+
+
+def test_recursive_rebase_conflict(repo: Git):
+    """
+    When bar's baseline is foo, and rebasing foo encounters a merge conflict,
+    the user resolves it and continues, after which bar is rebased onto the
+    updated foo.
+    """
+    repo.c("0")
+
+    # Create base branch and foo as a queue on it.
+    # foo1 modifies "shared" — this will conflict with base2.
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b foo base")
+    repo.w("shared", "foo version")
+    repo.s("git add shared && git commit -m foo1")
+    repo.c("foo2")
+    assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2"]
+
+    # Create bar as a queue with foo as its baseline
+    repo.s("git queue init -b bar foo")
+    repo.c("bar1")
+    repo.c("bar2")
+    assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2", "baseline", "bar1", "bar2"]
+
+    # Update base with a commit that conflicts with foo1's "shared" file
+    repo.s("git checkout base")
+    repo.w("shared", "base version")
+    repo.s("git add shared && git commit -m base2")
+
+    # Rebase bar — should rebase foo first, hitting a conflict on foo1
+    repo.s("git checkout bar")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+
+    # Resolve the conflict; one continue should finish both foo and bar rebases
+    repo.w("shared", "resolved")
+    repo.s("git add shared")
+    repo.s("git queue continue")
+
+    # foo should have been rebased to include base2
+    repo.s("git checkout foo")
+    assert repo.log() == ["0", "base1", "base2", "baseline", "foo1", "foo2"]
+
+    # bar should have been rebased onto the new foo
+    repo.s("git checkout bar")
+    assert repo.log() == [
+        "0",
+        "base1",
+        "base2",
+        "baseline",
+        "foo1",
+        "foo2",
+        "baseline",
+        "bar1",
+        "bar2",
+    ]
+
+
 def test_rebase2_cherry(repo: Git):
     """
     Test that rebase skips commits that have been cherry-picked down into

@@ -315,6 +315,29 @@ class EditBranch(Continuation[str]):
                 self.git.checkout(self.branch, comment="done editing branch")
 
 
+@dataclass
+class CheckoutBranch(Finally):
+    "Temporarily checkout ref, then restore to previous HEAD"
+
+    branch: str
+    old_branch: str | None = field(default=None)
+
+    def cleanup(self):
+        if self.old_branch is not None:
+            self.git.force_checkout(self.old_branch, comment="restore previous HEAD")
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        assert self.branch.startswith("refs/heads/")
+        if self.old_branch is None:
+            self.old_branch = self.git.head()
+            if self.old_branch.startswith("refs/heads/"):
+                self.old_branch = self.old_branch.removeprefix("refs/heads/")
+            self.git.checkout(self.branch.removeprefix("refs/heads/"), comment="checkout branch")
+        with super().impl():
+            yield
+
+
 class PickCherries(Continuation):
     "Yield, then cherry-pick specified commits."
 
@@ -367,3 +390,32 @@ def cherry_pick(ref: str, *, edit: bool = False) -> None:
         else:
             git.cherry_pick_abort()
             raise
+
+
+class Step(YAMLObject):
+
+    yaml_loader = Loader
+    yaml_dumper = Dumper
+
+    @abstractmethod
+    def run(self):
+        pass
+
+    @property
+    def git(self) -> Git:
+        return contextGit.get()
+
+
+class Then(Continuation):
+
+    steps: List[Step]
+
+    def __init__(self, *, steps: List[Step]):
+        super().__init__()
+        self.steps = steps
+
+    @contextmanager
+    def impl(self) -> Iterator[None]:
+        yield
+        while self.steps:
+            self.steps.pop(0).run()
