@@ -97,7 +97,10 @@ class Main(continuations.Main):
                     onto.append(parse_baseline(baseline, git=self.git))
 
                 for baseline in getattr(args, "remove", ()):
-                    ref = self.git.symbolic_full_name(baseline)
+                    if baseline.startswith("refs/"):
+                        ref = baseline
+                    else:
+                        ref = self.git.symbolic_full_name(baseline)
                     for i, baseline in enumerate(onto):
                         if baseline.ref == ref:
                             break
