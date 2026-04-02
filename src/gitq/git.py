@@ -163,7 +163,7 @@ class Git:
 
     @property
     def continuation(self) -> Path:
-        return self.gitdir / "continuation.json"
+        return self.gitdir / "continuation.yaml"
 
     def is_clean(self) -> bool:
         if self("diff-files", "--name-only", quiet=True):

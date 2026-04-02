@@ -1,5 +1,5 @@
 import sys
-import json
+import yaml
 from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator, NoReturn
 from contextlib import contextmanager
 from itertools import count
@@ -56,7 +56,7 @@ class ContinuationClass(type):
 #
 # A continuation class must:
 #
-#   * have only json-serializable attributes
+#   * have only serializable attributes
 #
 #   * have a 1-1 correspondence between those attributes and `__init__`
 #     keywords
@@ -75,7 +75,7 @@ class ContinuationClass(type):
 #     calls anything that might raise Suspend.   In other words, there is
 #     no magic here that somehow serializes the python execution state.
 #     Each `Continuation` instance is just going to be reanimated based on
-#     its json-serializeable attributes, and resume again from the yield.
+#     its serializeable attributes, and resume again from the yield.
 #
 class Continuation(Generic[T], metaclass=ContinuationClass):
 
@@ -139,7 +139,7 @@ class Main:
             raise UserError("Error: repo not clean")
         if self.git.continuation.exists():
             with open(self.git.continuation, "r") as f:
-                j = json.load(f)
+                j = yaml.safe_load(f)
             raise UserError(f"{j["tool"]} operation is already in progress.")
         try:
             yield
@@ -158,8 +158,7 @@ class Main:
             j["tool"] = self.tool
             if e.status:
                 j["status"] = e.status
-            json.dump(j, f, indent=True)
-            f.write("\n")
+            yaml.dump(j, f)
         print(self.suspend_message)
         sys.exit(2)
 
@@ -181,7 +180,7 @@ class Main:
             raise UserError(f"Error: no {self.tool} operation is in progress")
 
         with open(self.git.continuation, "r") as f:
-            j = json.load(f)
+            j = yaml.safe_load(f)
 
         if j["tool"] != self.tool:
             raise UserError(f"A {j["tool"]} operation is currently in progress")
@@ -202,7 +201,7 @@ class Main:
             print("no operation in progress")
             return
         with open(self.git.continuation, "r") as f:
-            j = json.load(f)
+            j = yaml.safe_load(f)
         if j["tool"] != self.tool:
             raise UserError(f"{j["tool"]} operation is in progress, not {self.tool}")
         print(j.get("status", f"{j["tool"]} operation is in progress"))
