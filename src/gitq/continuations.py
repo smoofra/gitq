@@ -20,6 +20,8 @@ class Dumper(yaml.Dumper):
 
 @dataclass
 class Continuations(YAMLObject):
+    "Root object for .git/continuation.yaml"
+
     yaml_loader = Loader
     yaml_dumper = Dumper
     continuations: List[Continuation]
@@ -33,7 +35,7 @@ T = TypeVar("T")
 
 
 class Suspend(BaseException):
-    "Suspend execution and save a stack of continuations in .git/continuation.json"
+    "Suspend execution and save a stack of continuations in .git/continuation.yaml"
 
     continuations: List["Continuation"]
     status: Optional[str]
@@ -56,7 +58,7 @@ class Abort(Exception):
 
 
 # A continuation is  is a context manager that can be suspended, serialized
-# out to json, and then resumed in a subsequent execution of this program.
+# out to yaml, and then resumed in a subsequent execution of this program.
 #
 # This is a very low-tech approach to serializeable continuations, and it
 # relies on suspendable code being written in a strange idiom to work.
