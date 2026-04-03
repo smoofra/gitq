@@ -95,15 +95,22 @@ class Git:
         self.directory = Path(top)
         self.gitdir = Path(self.cmd("git rev-parse --git-dir".split(), quiet=True).strip())
 
-    def log_cmd(self, cmd: List[str | Path] | str):
+    def log_cmd(self, cmd: List[str | Path] | str, comment: str = ""):
+        def quote(x):
+            return shlex.quote(re.sub(r"\n.*", "...", str(x), flags=re.DOTALL))
+
         if not isinstance(cmd, str):
-            cmd = " ".join(map(lambda x: shlex.quote(str(x)), cmd))
+            cmd = " ".join(map(quote, cmd))
+        if comment:
+            cmd += "  # " + comment
         print("+", cmd)
         sys.stdout.flush()
 
-    def cmd(self, cmd, *, quiet: bool = False, interactive: bool = False, **kw) -> str:
+    def cmd(
+        self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = "", **kw
+    ) -> str:
         if not quiet:
-            self.log_cmd(cmd)
+            self.log_cmd(cmd, comment=comment)
         if interactive:
             kw["stderr"] = subprocess.PIPE
         else:
@@ -137,7 +144,7 @@ class Git:
         return name or None
 
     def detach(self) -> None:
-        self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL)
+        self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL, comment="detach")
 
     def head(self) -> str:
         try:
@@ -145,8 +152,8 @@ class Git:
         except GitFailed:
             return self.rev_parse("HEAD")
 
-    def force_checkout(self, branch: str) -> None:
-        self.cmd(["git", "checkout", "-f", branch], stderr=FNULL)
+    def force_checkout(self, branch: str, comment: str = "") -> None:
+        self.cmd(["git", "checkout", "-f", branch], stderr=FNULL, comment=comment)
 
     def commit(self, ref: str) -> Commit:
         log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref, "--"], quiet=True)
@@ -161,8 +168,8 @@ class Git:
         logs = self.cmd(cmd, quiet=True)
         return [Commit(log=log) for log in logs.split("\x00") if log]
 
-    def checkout(self, branch: str) -> None:
-        self.cmd(["git", "checkout", branch], stderr=FNULL)
+    def checkout(self, branch: str, *, comment: str = "") -> None:
+        self.cmd(["git", "checkout", branch], stderr=FNULL, comment=comment)
 
     @property
     def continuation(self) -> Path:

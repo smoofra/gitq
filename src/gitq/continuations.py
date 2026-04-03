@@ -320,7 +320,7 @@ class EditBranch(Continuation[str]):
         else:
             if self.branch:
                 self.git.cmd(["git", "update-ref", "-m", self.message, self.head, "HEAD"])
-                self.git.checkout(self.branch)
+                self.git.checkout(self.branch, comment="done editing branch")
 
 
 class PickCherries(Continuation):

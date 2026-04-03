@@ -109,7 +109,7 @@ class Queue:
         baseline, *baselines = self.q.baselines
         assert baseline.sha
 
-        self.git.checkout(baseline.sha)
+        self.git.checkout(baseline.sha, comment="merge_baselines")
 
         if not baselines:
             self.git("commit", "--allow-empty", "-m", message("baseline", self.q.title))
