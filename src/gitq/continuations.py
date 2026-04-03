@@ -1,12 +1,12 @@
 import sys
 import yaml
-from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Iterator, NoReturn
+from typing import Optional, List, TypeVar, ContextManager, Generic, Iterator, NoReturn
 from contextlib import contextmanager
 from itertools import count
 from abc import abstractmethod
 from dataclasses import dataclass, field
 
-from .git import Git, UserError, GitFailed
+from .git import Git, UserError, GitFailed, contextGit
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -20,10 +20,9 @@ class Dumper(yaml.Dumper):
 
 @dataclass
 class Continuations(YAMLObject):
-    yaml_tag = "!Continuations"
     yaml_loader = Loader
     yaml_dumper = Dumper
-    continuations: List
+    continuations: List[Continuation]
     tool: str
     status: str | None = field(default=None)
 
@@ -54,17 +53,6 @@ class Abort(Exception):
     Raised into a resume stack by `--abort`.  This will abort the operation
     and restore git to its previous state.
     """
-
-
-# A metaclass for continuation types.  This just collects a dict of them all
-# indexed by name.
-class ContinuationClass(type):
-    types: Dict[str, "ContinuationClass"] = dict()
-
-    def __new__(cls, name, bases, attrs):
-        T = type.__new__(cls, name, bases, attrs)
-        cls.types[name] = T
-        return T
 
 
 # A continuation is  is a context manager that can be suspended, serialized
@@ -99,15 +87,12 @@ class ContinuationClass(type):
 #     Each `Continuation` instance is just going to be reanimated based on
 #     its serializeable attributes, and resume again from the yield.
 #
-class Continuation(Generic[T], metaclass=ContinuationClass):
+class Continuation(Generic[T], YAMLObject):
 
-    manager: ContextManager[T]
-    git: Git
+    yaml_loader = Loader
+    yaml_dumper = Dumper
 
-    __slots__ = ["manager", "git", "__dict__"]
-
-    def __init__(self, git: Git) -> None:
-        self.git = git
+    manager: ContextManager[T] = field(metadata={"yaml_exclude": True})
 
     def __enter__(self) -> T:
         self.manager = self.impl()
@@ -131,8 +116,9 @@ class Continuation(Generic[T], metaclass=ContinuationClass):
     def impl(self) -> ContextManager[T]:
         pass
 
-    def to_json(self) -> List:
-        return [self.__class__.__name__, self.__dict__]
+    @property
+    def git(sef) -> Git:
+        return contextGit.get()
 
 
 class Main:
@@ -146,6 +132,7 @@ class Main:
 
     def __call__(self) -> NoReturn:
         self.git = Git()
+        contextGit.set(self.git)
         try:
             self.main()
         except UserError as e:
@@ -174,22 +161,20 @@ class Main:
         if e.status:
             print(e.status)
         with open(self.git.continuation, "w") as f:
-            continuations = [k.to_json() for k in reversed(e.continuations)]
+            continuations = list(reversed(e.continuations))
             j = Continuations(continuations, self.tool, e.status)
             yaml.dump(j, f, Dumper=Dumper)
         print(self.suspend_message)
         sys.exit(2)
 
-    def reanimate(self, continuations: List[Dict], *, throw: BaseException | None) -> None:
+    def reanimate(self, continuations: List[Continuation], *, throw: BaseException | None) -> None:
         if not len(continuations):
             if throw is not None:
                 raise throw
             else:
                 return
         continuation, *continuations = continuations
-        kind, args = continuation
-        T = ContinuationClass.types[kind]
-        with T(self.git, **args):
+        with continuation:
             self.reanimate(continuations, throw=throw)
 
     def resume(self, throw: BaseException | None = None) -> NoReturn:
@@ -250,8 +235,8 @@ class Finally(Continuation):
 
 class DeleteTempBranch(Finally):
 
-    def __init__(self, git: Git, *, branch: str, previous_head: str):
-        super().__init__(git)
+    def __init__(self, *, branch: str, previous_head: str):
+        super().__init__()
         self.branch = branch
         self.previous_head = previous_head
 
@@ -266,11 +251,11 @@ class DeleteTempBranch(Finally):
 
 
 @contextmanager
-def TempBranch(git: Git) -> Iterator[str]:
+def TempBranch() -> Iterator[str]:
     """
     Create a temporary branch with no content and no parents.
     """
-
+    git = contextGit.get()
     branches = set(git.branches())
     for n in count():
         branch = f"temp-{n}"
@@ -279,20 +264,21 @@ def TempBranch(git: Git) -> Iterator[str]:
     else:
         raise AssertionError
 
-    with DeleteTempBranch(git=git, branch=branch, previous_head=git.head()):
+    with DeleteTempBranch(branch=branch, previous_head=git.head()):
         git.cmd(["git", "checkout", "-q", "--orphan", branch])
         git.delete_index_and_files()
         yield branch
 
 
 @contextmanager
-def CheckoutBaseline(git: Git, sha: str | None):
+def CheckoutBaseline(sha: str | None):
     """
     Checkout a baseline commit, or if argument is None, create a temporary
     branch with no history and check that out.
     """
+    git = contextGit.get()
     if sha is None:
-        with TempBranch(git):
+        with TempBranch():
             yield
     else:
         git.checkout(sha)
@@ -306,14 +292,14 @@ class EditBranch(Continuation[str]):
     branch using message, and check it back out again.
     """
 
-    def __init__(self, git: Git, *, message: str, head: Optional[str] = None) -> None:
-        super().__init__(git)
+    def __init__(self, *, message: str, head: Optional[str] = None) -> None:
+        super().__init__()
         self.message = message
         if head:
             self.head = head
         else:
-            self.head = git.head()
-            git.detach()
+            self.head = self.git.head()
+            self.git.detach()
 
     @property
     def branch(self) -> Optional[str]:
@@ -338,8 +324,8 @@ class EditBranch(Continuation[str]):
 class PickCherries(Continuation):
     "Yield, then cherry-pick specified commits."
 
-    def __init__(self, git: Git, *, cherries: List[str], edit: bool = False):
-        super().__init__(git)
+    def __init__(self, *, cherries: List[str], edit: bool = False):
+        super().__init__()
         self.cherries = cherries
         self.edit = edit
 
@@ -348,7 +334,7 @@ class PickCherries(Continuation):
         yield
         while self.cherries:
             cherry, *self.cherries = self.cherries
-            cherry_pick(cherry, git=self.git, edit=self.edit)
+            cherry_pick(cherry, edit=self.edit)
 
 
 class CherryPickContinue(Continuation):
@@ -357,8 +343,8 @@ class CherryPickContinue(Continuation):
     do it for them if they have't.
     """
 
-    def __init__(self, git: Git, *, ref: str):
-        super().__init__(git)
+    def __init__(self, *, ref: str):
+        super().__init__()
         self.ref = ref
 
     @contextmanager
@@ -375,13 +361,14 @@ class CherryPickContinue(Continuation):
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
-def cherry_pick(ref: str, *, edit: bool = False, git: Git) -> None:
+def cherry_pick(ref: str, *, edit: bool = False) -> None:
     "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
+    git = contextGit.get()
     try:
         git.cmd(["git", "cherry-pick", "--allow-empty", ref])
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
-            with CherryPickContinue(git, ref=ref):
+            with CherryPickContinue(ref=ref):
                 raise Suspend(status=f"cherry-picking {ref}")
         else:
             git.cherry_pick_abort()

@@ -1,27 +1,63 @@
 from typing import Self
-from dataclasses import fields
+from dataclasses import fields, is_dataclass, Field
 
 import yaml
 
 
-class YAMLObject(yaml.YAMLObject):
+class YAMLObjectMetaclass(yaml.YAMLObjectMetaclass):
+
+    def __init__(cls, name, bases, kwds):
+        cls.yaml_tag = "!" + name
+        kwds["yaml_tag"] = cls.yaml_tag
+        super().__init__(name, bases, kwds)
+
+
+def yaml_excluded_fields(cls) -> set[str]:
+    """Return the set of attribute names marked yaml_exclude via dataclasses.field()."""
+    excluded = set()
+    for klass in cls.__mro__:
+        for attr_name, attr_val in vars(klass).items():
+            if isinstance(attr_val, Field) and attr_val.metadata.get("yaml_exclude"):
+                excluded.add(attr_name)
+    return excluded
+
+
+def represent_value(value, dumper: yaml.Dumper):
+    if isinstance(value, str) and "\n" in value:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", value, style="|")
+    return dumper.represent_data(value)
+
+
+class YAMLObject(yaml.YAMLObject, metaclass=YAMLObjectMetaclass):
 
     # Override to_yaml to customize the yaml representation.
-    #   * Order of fields is as declared in the dataclass.
+    #   * Order of fields is as declared in the dataclass (or lexical order for non-dataclasses).
+    #   * Fields marked yaml_exclude are skipped.
     #   * False values are skipped.
     #   * Multiline strings are represented with pipe-style yaml strings.
     @classmethod
     def to_yaml(cls, dumper: yaml.Dumper, data: Self):
-        def i():
-            for f in fields(cls):  # type: ignore
-                value = getattr(data, f.name)
-                if not value:
-                    continue
-                if isinstance(value, str) and "\n" in value:
-                    rep = dumper.represent_scalar("tag:yaml.org,2002:str", value, style="|")
-                else:
-                    rep = dumper.represent_data(value)
-                yield (dumper.represent_data(f.name), rep)
+        excluded = yaml_excluded_fields(cls)
+        if is_dataclass(cls):
+
+            def i():
+                for f in fields(cls):
+                    if f.name in excluded:
+                        continue
+                    value = getattr(data, f.name)
+                    if value is None:
+                        continue
+                    yield (dumper.represent_data(f.name), represent_value(value, dumper))
+
+        else:
+
+            def i():
+                for key, value in sorted(data.__dict__.items()):
+                    if key in excluded:
+                        continue
+                    if value is None:
+                        continue
+                    yield (dumper.represent_data(key), represent_value(value, dumper))
 
         return yaml.MappingNode(cls.yaml_tag, list(i()))
 

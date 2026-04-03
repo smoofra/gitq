@@ -20,9 +20,9 @@ class Main(continuations.Main):
 
         with self.setup():
             commit = self.git.commit(args.commit)
-            with EditBranch(self.git, message="git-squash"):
+            with EditBranch(message="git-squash"):
                 with edit_commit(commit, git=self.git):
-                    with OrSquash(self.git, head=commit.sha, stop=False):
+                    with OrSquash(head=commit.sha, stop=False):
                         if args.fixup:
                             raise Fixup
                         else:

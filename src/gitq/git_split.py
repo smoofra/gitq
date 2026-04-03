@@ -7,7 +7,6 @@ from typing import Iterator
 
 from . import continuations
 from .continuations import Continuation, EditBranch, Suspend, Abort
-from .git import Git
 from .git_swap import edit_commit, PickCherryWithReference
 
 
@@ -15,8 +14,8 @@ class SuspendForAmend(Continuation):
     """Suspend after the inner block completes, so the user can run
     `git commit --amend` before continuing."""
 
-    def __init__(self, git: Git, *, done: bool = False):
-        super().__init__(git)
+    def __init__(self, *, done: bool = False):
+        super().__init__()
         self.done = done
 
     @contextmanager
@@ -69,10 +68,10 @@ class Main(continuations.Main):
         with self.setup():
             commit = self.git.commit(args.commit)
             sha = commit.sha
-            with EditBranch(self.git, message="git-split"):
+            with EditBranch(message="git-split"):
                 with edit_commit(commit, git=self.git, edit=True):
-                    with SuspendForAmend(self.git):
-                        with PickCherryWithReference(self.git, cherry=sha, reference=sha):
+                    with SuspendForAmend():
+                        with PickCherryWithReference(cherry=sha, reference=sha):
                             self.git("reset", "--soft", "HEAD^")
                             raise Suspend(
                                 status="Changes from the commit are now staged.\n"

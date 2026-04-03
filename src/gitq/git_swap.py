@@ -57,8 +57,8 @@ class Fixup(Resume):
 # is applied.
 class PickCherryWithReference(Continuation):
 
-    def __init__(self, git: Git, *, cherry: str, reference: str):
-        super().__init__(git)
+    def __init__(self, *, cherry: str, reference: str):
+        super().__init__()
         self.cherry = cherry
         self.reference = reference
 
@@ -72,10 +72,10 @@ class PickCherryWithReference(Continuation):
 # Handle the case when the user calls `git swap --squash`, etc..
 class OrSquash(Continuation):
 
-    def __init__(self, git: Git, head: str, stop: bool):
+    def __init__(self, *, head: str, stop: bool):
+        super().__init__()
         self.head = head
         self.stop = stop
-        super().__init__(git)
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -85,7 +85,7 @@ class OrSquash(Continuation):
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
-            with CheckoutBaseline(self.git, C.sha if C else None):
+            with CheckoutBaseline(C.sha if C else None):
                 self.git.checkout_tree(A.sha)
                 self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
             if self.stop:
@@ -94,7 +94,7 @@ class OrSquash(Continuation):
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
-            with CheckoutBaseline(self.git, C.sha if C else None):
+            with CheckoutBaseline(C.sha if C else None):
                 self.git.checkout_tree(A.sha)
                 author = split_author(B.author)
                 env = dict(os.environ)
@@ -123,8 +123,8 @@ class OrSquash(Continuation):
 # restore git state if swap failed
 class SwapCheckpoint(Continuation):
 
-    def __init__(self, git: Git, head: str):
-        super().__init__(git)
+    def __init__(self, *, head: str):
+        super().__init__()
         self.head = head
 
     @contextmanager
@@ -142,13 +142,12 @@ class KeepGoing(Continuation):
 
     def __init__(
         self,
-        git: Git,
         *,
         edit: bool = False,
         baselines: List[str],
         cherries: List[str] | None = None,
     ):
-        super().__init__(git)
+        super().__init__()
         self.edit = edit
         self.baselines = baselines
         self.cherries = cherries or list()
@@ -167,14 +166,14 @@ class KeepGoing(Continuation):
 
         except (SwapFailed, MergeFound, Stop):
             for cherry in self.cherries:
-                cherry_pick(cherry, git=self.git)
+                cherry_pick(cherry)
             return
 
 
 class KeepGoingUp(Continuation):
 
-    def __init__(self, git: Git, *, edit: bool = False, cherries: List[str]):
-        super().__init__(git)
+    def __init__(self, *, edit: bool = False, cherries: List[str]):
+        super().__init__()
         self.edit = edit
         self.cherries = cherries
 
@@ -215,7 +214,7 @@ def edit_commit(commit: Optional[Commit], *, git: Git, edit: bool = False):
         return
     cherries = collect_cherries(commit, git=git)
     git.checkout(commit.sha)
-    with PickCherries(git, cherries=cherries, edit=edit):
+    with PickCherries(cherries=cherries, edit=edit):
         yield
 
 
@@ -229,11 +228,11 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
         raise SwapFailed(f"Swap failed: {e}") from e
     if two.sha in baselines:
         raise SwapFailed("hit baseline")
-    with SwapCheckpoint(git, head=one.sha):
-        with CheckoutBaseline(git, three.sha if three else None):
-            with PickCherryWithReference(git, cherry=two.sha, reference=one.sha):
+    with SwapCheckpoint(head=one.sha):
+        with CheckoutBaseline(three.sha if three else None):
+            with PickCherryWithReference(cherry=two.sha, reference=one.sha):
                 try:
-                    cherry_pick(one.sha, edit=edit, git=git)
+                    cherry_pick(one.sha, edit=edit)
                 except GitFailed as e:
                     raise SwapFailed(f"Swap failed: {e}") from e
                 except Suspend as e:
@@ -250,7 +249,7 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
 # swap HEAD or HEAD^, or squash them together if the user resumes with `--squash`
 def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str], stop: bool) -> None:
     head = git.commit("HEAD")
-    with OrSquash(git, head=head.sha, stop=stop):
+    with OrSquash(head=head.sha, stop=stop):
         swap(edit=edit, git=git, baselines=baselines)
 
 
@@ -335,7 +334,7 @@ class Main(continuations.Main):
             return
 
         with self.setup():
-            with EditBranch(self.git, message="git-swap"):
+            with EditBranch(message="git-swap"):
                 if args.up:
                     self.swap_up(args)
                 else:
@@ -349,7 +348,7 @@ class Main(continuations.Main):
         commit = self.git.commit(args.commit) if args.commit else None
         with edit_commit(commit, git=self.git):
             if args.keep_going:
-                with KeepGoing(self.git, edit=args.edit, baselines=baselines):
+                with KeepGoing(edit=args.edit, baselines=baselines):
                     swap_or_squash(edit=args.edit, git=self.git, baselines=baselines, stop=True)
             else:
                 swap_or_squash(edit=args.edit, git=self.git, baselines=baselines, stop=False)
@@ -362,7 +361,7 @@ class Main(continuations.Main):
         if not cherries:
             raise UserError("commit is already at HEAD")
         if args.keep_going:
-            with KeepGoingUp(git=self.git, edit=args.edit, cherries=cherries):
+            with KeepGoingUp(edit=args.edit, cherries=cherries):
                 self.git.checkout(commit.sha)
         else:
             with edit_commit(self.git.commit(cherries[0]), git=self.git):

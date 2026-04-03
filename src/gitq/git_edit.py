@@ -47,7 +47,7 @@ class Main(continuations.Main):
 
         with self.setup():
             commit = self.git.commit(args.commit)
-            with EditBranch(self.git, message="git-edit"):
+            with EditBranch(message="git-edit"):
                 with edit_commit(commit, git=self.git, edit=True):
                     raise Suspend
 

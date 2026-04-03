@@ -5,8 +5,11 @@ import re
 from typing import List, Iterator, NamedTuple, Set
 from pathlib import Path
 import sys
+from contextvars import ContextVar
 
 FNULL = open(os.devnull, "w")
+
+contextGit: ContextVar[Git] = ContextVar("git")
 
 
 class GitFailed(Exception):

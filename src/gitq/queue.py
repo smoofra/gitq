@@ -20,7 +20,6 @@ class Dumper(yaml.Dumper):
 
 @dataclass
 class Baseline(YAMLObject):
-    yaml_tag = "!Baseline"
     yaml_loader = Loader
     yaml_dumper = Dumper
     sha: str
@@ -37,7 +36,6 @@ yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=D
 
 @dataclass
 class QueueFile(YAMLObject):
-    yaml_tag = "!QueueFile"
     yaml_loader = Loader
     yaml_dumper = Dumper
     title: str | None = field(default=None)
@@ -205,10 +203,10 @@ class Queue:
         if onto is None:
             onto = self.q.baselines
         self.q.baselines = [refresh_baseline(b, git=self.git) for b in onto]
-        with EditBranch(self.git, message="git-queue rebase") as branch:
+        with EditBranch(message="git-queue rebase") as branch:
             self.merge_baselines()
             patches = list(self.find_patches(branch, old_baselines, "HEAD"))
-            with PickCherries(self.git, cherries=[b.sha for b in patches], edit=True):
+            with PickCherries(cherries=[b.sha for b in patches], edit=True):
                 pass
 
 
