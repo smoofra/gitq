@@ -4,9 +4,31 @@ from typing import Optional, List, Dict, TypeVar, ContextManager, Generic, Itera
 from contextlib import contextmanager
 from itertools import count
 from abc import abstractmethod
+from dataclasses import dataclass, field
 
 from .git import Git, UserError, GitFailed
+from .yaml import YAMLObject, BaseLoader
 
+
+class Loader(BaseLoader):
+    pass
+
+
+class Dumper(yaml.Dumper):
+    pass
+
+
+@dataclass
+class Continuations(YAMLObject):
+    yaml_tag = "!Continuations"
+    yaml_loader = Loader
+    yaml_dumper = Dumper
+    continuations: List
+    tool: str
+    status: str | None = field(default=None)
+
+
+yaml.add_path_resolver("!Continuations", [], Loader=Loader, Dumper=Dumper)
 
 T = TypeVar("T")
 
@@ -139,8 +161,8 @@ class Main:
             raise UserError("Error: repo not clean")
         if self.git.continuation.exists():
             with open(self.git.continuation, "r") as f:
-                j = yaml.safe_load(f)
-            raise UserError(f"{j["tool"]} operation is already in progress.")
+                j: Continuations = yaml.load(f, Loader)
+            raise UserError(f"{j.tool} operation is already in progress.")
         try:
             yield
         except Suspend as e:
@@ -153,12 +175,8 @@ class Main:
             print(e.status)
         with open(self.git.continuation, "w") as f:
             continuations = [k.to_json() for k in reversed(e.continuations)]
-            j: Dict
-            j = {"continuations": continuations}
-            j["tool"] = self.tool
-            if e.status:
-                j["status"] = e.status
-            yaml.dump(j, f)
+            j = Continuations(continuations, self.tool, e.status)
+            yaml.dump(j, f, Dumper=Dumper)
         print(self.suspend_message)
         sys.exit(2)
 
@@ -180,15 +198,15 @@ class Main:
             raise UserError(f"Error: no {self.tool} operation is in progress")
 
         with open(self.git.continuation, "r") as f:
-            j = yaml.safe_load(f)
+            j: Continuations = yaml.load(f, Loader)
 
-        if j["tool"] != self.tool:
-            raise UserError(f"A {j["tool"]} operation is currently in progress")
+        if j.tool != self.tool:
+            raise UserError(f"A {j.tool} operation is currently in progress")
 
         self.git.continuation.unlink()
 
         try:
-            self.reanimate(j["continuations"], throw=throw)
+            self.reanimate(j.continuations, throw=throw)
         except Suspend as e:
             self.suspend(e)
         except Resume as e:
@@ -201,10 +219,10 @@ class Main:
             print("no operation in progress")
             return
         with open(self.git.continuation, "r") as f:
-            j = yaml.safe_load(f)
-        if j["tool"] != self.tool:
-            raise UserError(f"{j["tool"]} operation is in progress, not {self.tool}")
-        print(j.get("status", f"{j["tool"]} operation is in progress"))
+            j: Continuations = yaml.load(f, Loader)
+        if j.tool != self.tool:
+            raise UserError(f"{j.tool} operation is in progress, not {self.tool}")
+        print(j.status or f"{j.tool} operation is in progress")
 
 
 class Finally(Continuation):

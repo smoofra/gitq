@@ -26,7 +26,7 @@ class YAMLObject(yaml.YAMLObject):
         return yaml.MappingNode(cls.yaml_tag, list(i()))
 
 
-class Loader(yaml.SafeLoader):
+class BaseLoader(yaml.SafeLoader):
 
     # By default, PyYAML uses __new__() and .__dict__.update() to construct
     # objects.  Use the constructor provided by dataclasses instead, so that

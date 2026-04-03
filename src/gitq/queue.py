@@ -7,36 +7,49 @@ import yaml
 
 from .git import Git, Commit, GitFailed, UserError
 from .continuations import EditBranch, PickCherries
-from .yaml import YAMLObject, Loader
+from .yaml import YAMLObject, BaseLoader
+
+
+class Loader(BaseLoader):
+    pass
+
+
+class Dumper(yaml.Dumper):
+    pass
 
 
 @dataclass
 class Baseline(YAMLObject):
     yaml_tag = "!Baseline"
     yaml_loader = Loader
+    yaml_dumper = Dumper
     sha: str
     ref: str | None = field(default=None)
     remote: str | None = field(default=None)
 
 
-yaml.add_path_resolver("!QueueFile", [], Loader=Loader)
-yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader)
+yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
+yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
+
+# yaml.add_path_resolver("!QueueFile", [], Loader=Loader)
+# yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader)
 
 
 @dataclass
 class QueueFile(YAMLObject):
     yaml_tag = "!QueueFile"
     yaml_loader = Loader
+    yaml_dumper = Dumper
     title: str | None = field(default=None)
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
 
     def dump(self, f: IO):
-        yaml.dump(self, f)
+        yaml.dump(self, f, Dumper)
 
     def dumps(self) -> str:
         with StringIO() as f:
-            yaml.dump(self, f)
+            yaml.dump(self, f, Dumper)
             return f.getvalue()
 
     @classmethod
