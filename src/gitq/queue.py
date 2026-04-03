@@ -152,7 +152,7 @@ class Queue:
         """
         Yield commits in base..branch which are cherry-picked into new_base
         """
-        for line in self.git("cherry", new_base, branch, base).strip().splitlines():
+        for line in self.git("cherry", new_base, branch, base, quiet=True).strip().splitlines():
             sign, sha = line.split(" ", 1)
             if sign == "-":
                 yield sha
@@ -175,7 +175,7 @@ class Queue:
                     continue
                 else:
                     raise UserError("rebasing merges is not implemented yet")
-            changed = self.git("show", "--name-only", "--pretty=", commit.sha).strip()
+            changed = self.git("show", "--name-only", "--pretty=", commit.sha, quiet=True).strip()
             if changed == self.queuefile_name:
                 continue
             yield commit
@@ -191,7 +191,7 @@ class Queue:
 
     def find_baseline(self, commits: List[Commit]) -> str:
         merges = [c.sha for c in commits if from_this_tool(c)]
-        bases = self.git("merge-base", "--independent", *merges).strip().splitlines()
+        bases = self.git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
         if len(bases) > 1:
             # TODO make a throwaway merge here
             raise NotImplementedError
