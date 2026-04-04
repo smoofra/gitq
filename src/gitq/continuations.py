@@ -73,15 +73,9 @@ class Abort(Exception):
 #   * have a 1-1 correspondence between those attributes and `__init__`
 #     keywords
 #
-#   * perform no side effects in `__init__`, EXCEPT as a result of
-#     normalizing those attributes.  For example, `EditBranch` takes an
-#     optional argument `head`.   If `head is None`, then it does an
-#     effectful initialization, and sets `head` to something.   If `head is
-#     not None`, then no initialization is performed.
+#   * perform no side effects in `__init__`
 #
 #   * implement a context manager overriding `.impl()`
-#
-#   * perform no side effects in `.impl()` prior to yield
 #
 #   * be prepared to reconstruct the execution state of `.impl()`, if it
 #     calls anything that might raise Suspend.   In other words, there is
@@ -287,6 +281,7 @@ def CheckoutBaseline(sha: str | None):
         yield
 
 
+@dataclass
 class EditBranch(Continuation[str]):
     """
     Detach from the current branch, so it can be edited without polluting
@@ -294,23 +289,20 @@ class EditBranch(Continuation[str]):
     branch using message, and check it back out again.
     """
 
-    def __init__(self, *, message: str, head: Optional[str] = None) -> None:
-        super().__init__()
-        self.message = message
-        if head:
-            self.head = head
-        else:
-            self.head = self.git.head()
-            self.git.detach()
+    message: str
+    head: str | None = field(default=None)
 
     @property
     def branch(self) -> Optional[str]:
-        if self.head.startswith("refs/heads/"):
+        if self.head and self.head.startswith("refs/heads/"):
             return self.head.removeprefix("refs/heads/") or None
         return None
 
     @contextmanager
     def impl(self) -> Iterator[str]:
+        if self.head is None:
+            self.head = self.git.head()
+            self.git.detach()
         try:
             yield self.head
         except (Exception, Resume):
