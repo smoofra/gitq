@@ -2,7 +2,19 @@
 
 ##  ⚠️ 🪏 Work In Progress 🪏 ⚠️ 
 
-This is currently a work in progress and doesn't do much yet.
+This is currently a work in progress.  Planned features for `git-queue` include:
+
+* Baseline conflict resolution.   If baselines conflict a queue can contain
+  a merge commit to resolve the conflict.  Rebase should somehow be able to
+  deal with this in reasonable cases.
+
+*  Unapplied patches.  If rebase fails due to conflicts, give the user the
+   choice to save commits as patch files to be applied later.
+
+* Queue history.   Allow queues to be committed to git history so previous
+  versions of the queue are not lost when history is edited.   This is
+  intended to be used for long-standing patch sets with no prospect of
+  being merged upstream.
 
 ## Description
 
@@ -71,15 +83,145 @@ the following distinguishing characteristics
 
 ## `git-swap`
 
-`git-swap` can re-order commits like `git rebase -i`, but it is, in my
-opinion easier to use.   In particular, conflicts must often be resolved
-twice when using rebase, but not with `git-swap`.  `git-swap` reverses the
-order of two adjacent commits, while holding the final content constant.
+`git-swap` re-orders commits like `git rebase -i`, but is easier to use.
+In particular, conflicts must often be resolved twice when using rebase, but
+not with `git-swap`.  `git-swap` reverses the order of two adjacent commits,
+while holding the final content constant.
+
+```
+git swap [OPTIONS] [COMMIT]
+```
+
+Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history).
+Defaults to HEAD.
+
+Options:
+
+- `--keep-going`, `-k` — push COMMIT as far down the stack as it will go,
+  stopping only when a swap would fail due to conflicts or a baseline boundary.
+- `--up` — swap COMMIT with the commit above it (i.e. move COMMIT one step
+  later in history) rather than the default downward direction.
+- `--edit`, `-e` — if conflicts arise, suspend so the user can resolve them
+  manually, then resume with `git swap --continue`.
+- `--continue`, `-c` — resume after conflicts have been resolved.
+- `--abort` — give up and restore git to its original state.
+- `--stop` — abandon the current swap operation and push remaining commits
+  back onto the branch.
+- `--squash` — instead of completing the swap, squash the two commits together.
+- `--fixup` — like `--squash`, but discard the lower commit's message.
+- `--status` — print the current operation status.
+
+When `git-swap` is used on a queue branch, it will not swap past the queue's
+baseline boundary.
+
 
 ## `git-queue`
 
-`git-queue` is manipulates a queue.   A queue is a git branch with a baseline,
-which is specified in the `.git-queue` file.
+`git-queue` manages a queue.  A queue is a git branch with one or more
+baselines, recorded in a `.git-queue` file committed at the root of the branch.
+
+```
+git queue SUBCOMMAND [OPTIONS]
+```
+
+### `git queue init [--branch BRANCH] [--title TITLE] BASELINE...`
+
+Initialize a queue on the current branch (or create a new branch with
+`--branch`/`-b`) with one or more baselines.  Each BASELINE is a branch,
+tag, or commit.
+
+### `git queue rebase [--add BASELINE] [--remove BASELINE]`
+
+Rebase the queue onto its baselines, incorporating any upstream changes.
+If a baseline branch is itself a queue managed by this tool, it will be
+recursively rebased first.
+
+Use `--add` to incorporate an additional baseline, or `--remove` to drop one,
+at the same time as rebasing.
+
+If conflicts arise during cherry-picking, the operation suspends so the user
+can resolve them, then resume with `git queue continue`.
+
+### `git queue add BASELINE...`
+
+Add one or more baselines and rebase.
+
+### `git queue remove BASELINE...`
+
+Remove one or more baselines and rebase.
+
+### `git queue continue`
+
+Resume a suspended operation.
+
+### `git queue abort`
+
+Abort a suspended operation and restore git to its previous state.
+
+### `git queue status`
+
+Print the current operation status.
+
+### `git queue tidy`
+
+Normalize and rewrite the `.git-queue` file in the current branch.
+
+
+## `git-edit`
+
+`git-edit` checks out a specific commit for editing, then replays everything
+above it when you continue — similar to `git rebase -i` with `edit`.
+
+```
+git edit [COMMIT]
+```
+
+Detaches HEAD at COMMIT, suspending so the user can amend it.  When done,
+resume with `git edit --continue` to replay all commits that were above
+COMMIT back on top.
+
+Options:
+
+- `--continue`, `-c` — resume after edits are complete.
+- `--abort` — give up and restore git to its original state.
+- `--status` — print the current operation status.
+
+
+## `git-split`
+
+`git-split` splits a single commit into two or more commits.   It allows
+the user to add a additional commits, while holding the final content
+constant.
+
+```
+git split [COMMIT]
+```
+
+Checks out COMMIT with its changes staged (via `git reset --soft HEAD^`),
+suspending so the user can make one or more new commits.  After the user
+continues, COMMIT will be restored with it's original content, and
+`git-split` will suspend again so the user can amend the commit message
+with `git commit --amend`.   After continuing again, it  replays the
+remaining commits from above COMMIT on top.
+
+Options:
+
+- `--continue`, `-c` — resume at each suspension point.
+- `--abort` — give up and restore git to its original state.
+- `--status` — print the current operation status.
+
+
+## `git-squash`
+
+`git-squash` squashes a commit into its parent.
+
+```
+git squash [--fixup] COMMIT
+```
+
+Combines COMMIT with COMMIT^.  Opens an editor to compose the combined commit
+message (like `git commit --squash`).  With `--fixup`/`-f`, discards COMMIT's
+message and keeps only the parent's (like `git commit --fixup`).
 
 
 [stgit]: https://stacked-git.github.io/
