@@ -14,8 +14,8 @@ contextGit: ContextVar[Git] = ContextVar("git")
 
 class GitFailed(Exception):
 
-    def __init__(self, messge: str, *, rc: int):
-        super().__init__(messge)
+    def __init__(self, message: str, *, rc: int):
+        super().__init__(message)
         self.rc = rc
 
 
