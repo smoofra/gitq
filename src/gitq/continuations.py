@@ -6,6 +6,7 @@ from itertools import count
 from abc import abstractmethod
 from dataclasses import dataclass, field
 
+from .output import Output
 from .git import Git, UserError, GitFailed, contextGit
 from .yaml import YAMLObject, BaseLoader
 
@@ -127,10 +128,10 @@ class Main:
         try:
             self.main()
         except UserError as e:
-            print(e)
+            Output.print(e)
             sys.exit(1)
         except Abort:
-            print("Cancelled.  Previous state restored.")
+            Output.print("Cancelled.  Previous state restored.")
         sys.exit(0)
 
     @contextmanager
@@ -150,12 +151,12 @@ class Main:
 
     def suspend(self, e: Suspend) -> NoReturn:
         if e.status:
-            print(e.status)
+            Output.print(e.status)
         with open(self.git.continuation, "w") as f:
             continuations = list(reversed(e.continuations))
             j = Continuations(continuations, self.tool, e.status)
             yaml.dump(j, f, Dumper=Dumper)
-        print(self.suspend_message)
+        Output.print(self.suspend_message)
         sys.exit(2)
 
     def reanimate(self, continuations: List[Continuation], *, throw: BaseException | None) -> None:
@@ -192,13 +193,13 @@ class Main:
 
     def status(self) -> None:
         if not self.git.continuation.exists():
-            print("no operation in progress")
+            Output.print("no operation in progress")
             return
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
         if j.tool != self.tool:
             raise UserError(f"{j.tool} operation is in progress, not {self.tool}")
-        print(j.status or f"{j.tool} operation is in progress")
+        Output.print(j.status or f"{j.tool} operation is in progress")
 
 
 class Finally(Continuation):
@@ -232,7 +233,7 @@ class DeleteTempBranch(Finally):
 
     def cleanup(self) -> None:
         if self.git.on_orphan_branch():
-            print(f"# reset back to before creating {self.branch} branch")
+            Output.print(f"# reset back to before creating {self.branch} branch")
             self.git.force_checkout(self.previous_head)
         else:
             self.git.detach()
@@ -300,7 +301,7 @@ class EditBranch(Continuation[str]):
         try:
             yield self.head
         except (Exception, Resume):
-            print("# Failed.  Resetting to original HEAD")
+            Output.print("# Failed.  Resetting to original HEAD")
             self.git.force_checkout(self.branch or self.head)
             raise
         else:
@@ -365,7 +366,7 @@ class CherryPickContinue(Continuation):
             raise
         if self.git.cherry_pick_in_progress:
             if self.git.has_unmerged_files():
-                print("The index still has unmerged files.")
+                Output.print("The index still has unmerged files.")
                 raise Suspend(status=f"cherry-picking {self.ref}")
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
@@ -374,7 +375,7 @@ def cherry_pick(ref: str, *, edit: bool = False) -> None:
     "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
     git = contextGit.get()
     try:
-        git.cmd(["git", "cherry-pick", "--allow-empty", ref])
+        git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", ref])
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
             with CherryPickContinue(ref=ref):

@@ -218,11 +218,11 @@ def test_recursive_rebase_conflict(repo: Git):
 
     # Create base branch and foo as a queue on it.
     # foo1 modifies "shared" — this will conflict with base2.
-    repo.s("git checkout -b base")
+    repo.s("git checkout -q -b base")
     repo.c("base1")
     repo.s("git queue init -b foo base")
     repo.w("shared", "foo version")
-    repo.s("git add shared && git commit -m foo1")
+    repo.s("git add shared && git commit -q -m foo1")
     repo.c("foo2")
     assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2"]
 
@@ -233,12 +233,12 @@ def test_recursive_rebase_conflict(repo: Git):
     assert repo.log() == ["0", "base1", "baseline", "foo1", "foo2", "baseline", "bar1", "bar2"]
 
     # Update base with a commit that conflicts with foo1's "shared" file
-    repo.s("git checkout base")
+    repo.s("git checkout -q base")
     repo.w("shared", "base version")
-    repo.s("git add shared && git commit -m base2")
+    repo.s("git add shared && git commit -q -m base2")
 
     # Rebase bar — should rebase foo first, hitting a conflict on foo1
-    repo.s("git checkout bar")
+    repo.s("git checkout -q bar")
     repo.s("git queue rebase; [[ $? = 2 ]]")
     assert repo.unmerged() == {"shared"}
 
@@ -248,11 +248,11 @@ def test_recursive_rebase_conflict(repo: Git):
     repo.s("git queue continue")
 
     # foo should have been rebased to include base2
-    repo.s("git checkout foo")
+    repo.s("git checkout -q foo")
     assert repo.log() == ["0", "base1", "base2", "baseline", "foo1", "foo2"]
 
     # bar should have been rebased onto the new foo
-    repo.s("git checkout bar")
+    repo.s("git checkout -q bar")
     assert repo.log() == [
         "0",
         "base1",

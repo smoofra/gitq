@@ -1,11 +1,11 @@
 import os
 import subprocess
-import shlex
 import re
 from typing import List, Iterator, NamedTuple, Set
 from pathlib import Path
-import sys
 from contextvars import ContextVar
+
+from .output import Output
 
 FNULL = open(os.devnull, "w")
 
@@ -95,22 +95,11 @@ class Git:
         self.directory = Path(top)
         self.gitdir = Path(self.cmd("git rev-parse --git-dir".split(), quiet=True).strip())
 
-    def log_cmd(self, cmd: List[str | Path] | str, comment: str = ""):
-        def quote(x):
-            return shlex.quote(re.sub(r"\n.*", "...", str(x), flags=re.DOTALL))
-
-        if not isinstance(cmd, str):
-            cmd = " ".join(map(quote, cmd))
-        if comment:
-            cmd += "  # " + comment
-        print("+", cmd)
-        sys.stdout.flush()
-
     def cmd(
         self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = "", **kw
     ) -> str:
         if not quiet:
-            self.log_cmd(cmd, comment=comment)
+            Output.log_cmd(cmd, comment=comment)
         if interactive:
             kw["stderr"] = subprocess.PIPE
         else:
@@ -226,7 +215,7 @@ class Git:
         return not self.ref_exists(head)
 
     def delete_index_and_files(self):
-        self.log_cmd("git ls-files -z | xargs -0 rm")
+        Output.log_cmd("git ls-files -z | xargs -0 rm")
         for file in self.ls_files():
             path = self.directory / file
             if os.path.exists(path):
@@ -236,7 +225,7 @@ class Git:
     def cherry_pick_abort(self) -> None:
         if self.cherry_pick_in_progress:
             if self.on_orphan_branch():
-                self.log_cmd(["rm", self.gitdir / "CHERRY_PICK_HEAD"])
+                Output.log_cmd(["rm", self.gitdir / "CHERRY_PICK_HEAD"])
                 (self.gitdir / "CHERRY_PICK_HEAD").unlink()
                 self.delete_index_and_files()
             else:

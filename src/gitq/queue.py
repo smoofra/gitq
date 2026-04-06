@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from .output import Output
 from .git import Git, Commit, GitFailed, UserError, contextGit
 from .continuations import EditBranch, PickCherries, Step, Then, CheckoutBranch
 from .continuations import Loader as ContinuationsLoader, Dumper as ContinuationsDumper
@@ -188,7 +189,8 @@ class Queue:
         return base
 
     def rebase(self, onto: List[Baseline] | None = None) -> None:
-        Rebase(onto).run()
+        with Output.heading("rebasing"):
+            Rebase(onto).run()
 
     @classmethod
     def needs_rebase(cls, ref: str | None) -> bool:
@@ -212,7 +214,7 @@ class RebaseBranch(Step):
     ref: str
 
     def run(self):
-        with CheckoutBranch(self.ref):
+        with Output.heading(f"rebasing branch {self.ref}"), CheckoutBranch(self.ref):
             Rebase().run()
 
 

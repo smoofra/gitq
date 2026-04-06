@@ -8,7 +8,8 @@ import shutil
 
 import pytest
 
-import gitq.git
+from gitq.output import Output
+from gitq.git import Git as BaseGit
 from gitq.git_queue import Queue
 
 __all__ = ["Git", "repo"]
@@ -24,16 +25,17 @@ class Directory:
 
     def s(self, command: str):
         "run a shell command"
-        sys.stdout.flush()
-        sys.stderr.flush()
-        subprocess.run(command, shell=True, check=True, cwd=self.path, stderr=sys.stdout)
+        Output.flush()
+        Output.log_cmd(command)
+        with Output.indent():
+            subprocess.run(command, shell=True, check=True, cwd=self.path, stderr=sys.stdout)
 
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"
-        sys.stdout.flush()
-        sys.stderr.flush()
-        proc = subprocess.run(command, shell=True, cwd=self.path, stderr=sys.stdout)
-        return proc.returncode == 0
+        Output.flush()
+        with Output.indent():
+            proc = subprocess.run(command, shell=True, cwd=self.path, stderr=sys.stdout)
+            return proc.returncode == 0
 
     def w(self, filename: str, content: str):
         "write a file"
@@ -42,14 +44,14 @@ class Directory:
             f.write("\n")
 
 
-class Git(Directory, gitq.git.Git):
+class Git(Directory, BaseGit):
 
     def __init__(self, path: Path):
         Directory.__init__(self, path)
         if not (path / ".git").exists():
             self.s("git init -q")
             self.s("git config set advice.detachedHead false")
-        gitq.git.Git.__init__(self, path)
+        BaseGit.__init__(self, path)
 
     def log(self, n=None) -> List[str]:
         command = ["git", "log", "--topo-order", "--reverse", "--format=%s"]
@@ -75,11 +77,13 @@ class Git(Directory, gitq.git.Git):
             content = message
         self.w(filename, content)
         self("add", filename)
-        self("commit", "--allow-empty", "-m", message)
+        self("commit", "--allow-empty", "-q", "-m", message)
 
 
 @pytest.fixture(scope="function")
 def repo(tmp_path: Path) -> Git:
+    Output.print()
+
     if "GIT_QUEUE_TEMP_REPO" in os.environ:
         tmp_path = Path(os.environ["GIT_QUEUE_TEMP_REPO"])
 

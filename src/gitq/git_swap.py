@@ -19,6 +19,7 @@ from .continuations import (
     Suspend,
 )
 from . import continuations
+from .output import Output
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 from .queue import Queue, NotAQueue
 
@@ -130,7 +131,7 @@ class SwapCheckpoint(Continuation):
         try:
             yield
         except (Exception, Resume):
-            print("# reset back to before attempted swap")
+            Output.print("# reset back to before attempted swap")
             self.git.force_checkout(self.head)
             raise
 
@@ -173,12 +174,12 @@ class KeepGoingUp(Continuation):
             yield  # check out base commit
             while self.cherries:
                 cherry, *self.cherries = self.cherries
-                self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
+                self.git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", cherry])
                 swap_or_squash(git=self.git, edit=self.edit, baselines=[], stop=True)
         except (Stop, SwapFailed):
             pass
         for cherry in self.cherries:
-            self.git.cmd(["git", "cherry-pick", "--allow-empty", cherry])
+            self.git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", cherry])
 
 
 def collect_cherries(commit: Optional[Commit], *, git: Git) -> List[str]:
@@ -253,7 +254,7 @@ class Main(continuations.Main):
             super().__call__()
             sys.exit(1)
         except SwapFailed as e:
-            print(e)
+            Output.print(e)
             sys.exit(1)
 
     def main(self) -> None:
