@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Self, IO, Iterator
+from typing import List, Iterator
 from io import StringIO
 from pathlib import Path
 
@@ -48,23 +48,6 @@ class QueueFile(YAMLObject):
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
 
-    def dump(self, f: IO):
-        yaml.dump(self, f, Dumper)
-
-    def dumps(self) -> str:
-        with StringIO() as f:
-            yaml.dump(self, f, Dumper)
-            return f.getvalue()
-
-    @classmethod
-    def load(cls, f: IO) -> Self:
-        return yaml.load(f, Loader=Loader)
-
-    @classmethod
-    def loads(cls, s: str) -> Self:
-        with StringIO(s) as f:
-            return yaml.load(f, Loader=Loader)
-
 
 def message(m: str, title: str | None):
     trailers = "Tool: gitq"
@@ -101,12 +84,12 @@ class Queue:
             if not self.queuefile_path.exists():
                 raise NotAQueue("This branch is not a queue.")
             with open(self.queuefile_path, "r") as f:
-                self.qf = QueueFile.load(f)
+                self.qf = yaml.load(f, Loader=Loader)
 
     def save_queuefile(self, *, amend: bool):
         assert amend
         with open(self.queuefile_path, "w") as f:
-            self.qf.dump(f)
+            yaml.dump(self.qf, f, Dumper=Dumper)
         self.git("add", self.queuefile_path)
         self.git("commit", "--amend", "-C", "HEAD")
 
@@ -228,7 +211,7 @@ class Queue:
             content = git("show", f"{ref}:{cls.queuefile_name}", quiet=True)
         except GitFailed:
             return False
-        qf = QueueFile.loads(content)
+        qf = yaml.load(StringIO(content), Loader=Loader)
         for b in qf.baselines:
             if refresh_baseline(b, git=git).sha != b.sha:
                 return True

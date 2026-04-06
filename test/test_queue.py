@@ -1,12 +1,16 @@
 from textwrap import dedent
-from gitq.queue import QueueFile
+from io import StringIO
+
+import yaml
+
+from gitq.queue import QueueFile, Loader, Dumper
 
 
-def test_yaml():
+def test_yaml() -> None:
 
-    q = QueueFile.loads("{}")
-    assert q.description is None
-    assert q.baselines == []
+    qf: QueueFile = yaml.load(StringIO("{}"), Loader=Loader)
+    assert qf.description is None
+    assert qf.baselines == []
 
     y = """
         title: my branch
@@ -20,9 +24,9 @@ def test_yaml():
           remote: https://example.com/project.git
     """
 
-    q = QueueFile.loads(dedent(y))
-    assert q.description == "This is a branch.\nFoo Bar Baz\n"
-    foo, bar = q.baselines
+    qf = yaml.load(StringIO(dedent(y)), Loader=Loader)
+    assert qf.description == "This is a branch.\nFoo Bar Baz\n"
+    foo, bar = qf.baselines
     assert foo.ref is None
     assert foo.remote is None
     assert foo.sha == "xyz"
@@ -30,10 +34,12 @@ def test_yaml():
     assert bar.remote == "https://example.com/project.git"
     assert bar.sha == "abcdef"
 
-    assert dedent(y).strip() == q.dumps().strip()
+    with StringIO() as s:
+        yaml.dump(qf, s, Dumper=Dumper)
+        assert dedent(y).strip() == s.getvalue().strip()
 
     try:
-        QueueFile.loads("lol: wtf")
+        qf = yaml.load(StringIO("lol: wtf"), Loader=Loader)
     except Exception:
         pass
     else:
