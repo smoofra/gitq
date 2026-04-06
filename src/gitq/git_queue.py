@@ -83,7 +83,7 @@ class Main(continuations.Main):
             if args.command == "init":
                 baselines = [parse_baseline(ref, git=self.git) for ref in args.baselines]
                 q = QueueFile(baselines=list(baselines), title=args.title)
-                queue = Queue(self.git, q=q)
+                queue = Queue(self.git, qf=q)
                 if args.branch:
                     queue.init_new_branch(args.branch)
                 else:
@@ -91,7 +91,7 @@ class Main(continuations.Main):
 
             if args.command in ("rebase", "add", "remove"):
                 queue = Queue(self.git)
-                onto = list(queue.q.baselines)
+                onto = list(queue.qf.baselines)
 
                 for baseline in getattr(args, "add", ()):
                     onto.append(parse_baseline(baseline, git=self.git))

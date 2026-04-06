@@ -66,7 +66,7 @@ class Git(Directory, gitq.git.Git):
 
     @property
     def q(self):
-        return Queue(self).q
+        return Queue(self).qf
 
     def c(self, message: str, *, filename: str | None = None, content: str | None = None):
         if filename is None:

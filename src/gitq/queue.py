@@ -81,7 +81,7 @@ class NotAQueue(UserError):
 class Queue:
 
     git: Git
-    q: QueueFile
+    qf: QueueFile
 
     queuefile_name = ".git-queue"
 
@@ -89,39 +89,39 @@ class Queue:
     def queuefile_path(self) -> Path:
         return self.git.directory / self.queuefile_name
 
-    def __init__(self, git: Git, *, q: QueueFile | None = None):
+    def __init__(self, git: Git, *, qf: QueueFile | None = None):
         self.git = git
-        if q:
-            self.q = q
+        if qf:
+            self.qf = qf
         else:
             if not self.queuefile_path.exists():
                 raise NotAQueue("This branch is not a queue.")
             with open(self.queuefile_path, "r") as f:
-                self.q = QueueFile.load(f)
+                self.qf = QueueFile.load(f)
 
     def save_queuefile(self, *, amend: bool):
         assert amend
         with open(self.queuefile_path, "w") as f:
-            self.q.dump(f)
+            self.qf.dump(f)
         self.git("add", self.queuefile_path)
         self.git("commit", "--amend", "-C", "HEAD")
 
     def merge_baselines(self) -> Commit:
 
-        baseline, *baselines = self.q.baselines
+        baseline, *baselines = self.qf.baselines
         assert baseline.sha
 
         self.git.checkout(baseline.sha, comment="merge_baselines")
 
         if not baselines:
-            self.git("commit", "--allow-empty", "-m", message("baseline", self.q.title))
+            self.git("commit", "--allow-empty", "-m", message("baseline", self.qf.title))
             self.save_queuefile(amend=True)
             return self.git.commit("HEAD")
 
         refs = [b.sha for b in baselines]
 
         try:
-            self.git("merge", "--no-ff", *refs, "-m", message("merged baselines", self.q.title))
+            self.git("merge", "--no-ff", *refs, "-m", message("merged baselines", self.qf.title))
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 self.git("merge", "--abort")
@@ -141,7 +141,7 @@ class Queue:
         return self.git.commit("HEAD")
 
     def init(self):
-        self.git("commit", "--allow-empty", "-m", message("initialized queue", self.q.title))
+        self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
         self.save_queuefile(amend=True)
 
     def init_new_branch(self, branch: str):
@@ -184,9 +184,9 @@ class Queue:
 
     def baselines_for_swap(self) -> Iterator[str]:
         "return a list of shas that git-swap should not proceed past"
-        for b in self.q.baselines:
+        for b in self.qf.baselines:
             yield b.sha
-        commits = self.git.commits(*(f"^{b.sha}" for b in self.q.baselines), "HEAD", reverse=True)
+        commits = self.git.commits(*(f"^{b.sha}" for b in self.qf.baselines), "HEAD", reverse=True)
         for commit in commits:
             if from_this_tool(commit):
                 yield commit.sha
@@ -248,11 +248,11 @@ class RebaseOne(Step):
     def run(self):
         q = Queue(self.git)
 
-        old_baselines = q.q.baselines
+        old_baselines = q.qf.baselines
         if self.onto is None:
-            self.onto = q.q.baselines
+            self.onto = q.qf.baselines
 
-        q.q.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
+        q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
         with EditBranch(message="git-queue rebase") as branch:
             q.merge_baselines()
             patches = list(q.find_patches(branch, old_baselines, "HEAD"))
@@ -269,7 +269,7 @@ class Rebase(Step):
         steps: List[Step] = list()
 
         q = Queue(self.git)
-        for b in q.q.baselines:
+        for b in q.qf.baselines:
             if q.needs_rebase(b.ref):
                 assert b.ref
                 steps.append(RebaseBranch(b.ref))

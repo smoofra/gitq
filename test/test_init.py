@@ -10,10 +10,10 @@ def test_init(repo: Git):
     repo.s("git branch base HEAD")
     repo.s("git queue init base")
     assert repo.log() == ["a", "initialized queue"]
-    assert [b.ref for b in Queue(repo).q.baselines] == ["refs/heads/base"]
+    assert [b.ref for b in Queue(repo).qf.baselines] == ["refs/heads/base"]
     repo.s("git queue rebase")
     assert repo.log() == ["a", "baseline"]
-    assert [b.ref for b in Queue(repo).q.baselines] == ["refs/heads/base"]
+    assert [b.ref for b in Queue(repo).qf.baselines] == ["refs/heads/base"]
 
 
 def test_init_new_branch(repo: Git):
@@ -23,4 +23,4 @@ def test_init_new_branch(repo: Git):
     repo.s("git queue init -b foo base")
     assert repo.head() == "refs/heads/foo"
     assert repo.log() == ["a", "baseline"]
-    assert [b.ref for b in Queue(repo).q.baselines] == ["refs/heads/base"]
+    assert [b.ref for b in Queue(repo).qf.baselines] == ["refs/heads/base"]
