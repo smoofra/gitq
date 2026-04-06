@@ -21,8 +21,10 @@ class Dumper(yaml.Dumper):
 
 @dataclass
 class Baseline(YAMLObject):
+
     yaml_loader = Loader
     yaml_dumper = Dumper
+
     sha: str
     ref: str | None = field(default=None)
     remote: str | None = field(default=None)
@@ -38,8 +40,10 @@ ContinuationsDumper.add_representer(Baseline, Baseline.to_yaml)
 
 @dataclass
 class QueueFile(YAMLObject):
+
     yaml_loader = Loader
     yaml_dumper = Dumper
+
     title: str | None = field(default=None)
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
