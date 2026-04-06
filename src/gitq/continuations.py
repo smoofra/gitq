@@ -68,12 +68,7 @@ class Abort(Exception):
 #
 # A continuation class must:
 #
-#   * have only serializable attributes
-#
-#   * have a 1-1 correspondence between those attributes and `__init__`
-#     keywords
-#
-#   * perform no side effects in `__init__`
+#   * be a dataclass with only serializable attributes
 #
 #   * implement a context manager overriding `.impl()`
 #
@@ -229,12 +224,11 @@ class Finally(Continuation):
             self.cleanup()
 
 
+@dataclass
 class DeleteTempBranch(Finally):
 
-    def __init__(self, *, branch: str, previous_head: str):
-        super().__init__()
-        self.branch = branch
-        self.previous_head = previous_head
+    branch: str
+    previous_head: str
 
     def cleanup(self) -> None:
         if self.git.on_orphan_branch():
@@ -338,13 +332,12 @@ class CheckoutBranch(Finally):
             yield
 
 
+@dataclass
 class PickCherries(Continuation):
     "Yield, then cherry-pick specified commits."
 
-    def __init__(self, *, cherries: List[str], edit: bool = False):
-        super().__init__()
-        self.cherries = cherries
-        self.edit = edit
+    cherries: List[str]
+    edit: bool = field(default=False)
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -354,15 +347,14 @@ class PickCherries(Continuation):
             cherry_pick(cherry, edit=self.edit)
 
 
+@dataclass
 class CherryPickContinue(Continuation):
     """
     When resuming, check if the user ran `git cherry-pick --continue`, and
     do it for them if they have't.
     """
 
-    def __init__(self, *, ref: str):
-        super().__init__()
-        self.ref = ref
+    ref: str
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -406,13 +398,10 @@ class Step(YAMLObject):
         return contextGit.get()
 
 
+@dataclass
 class Then(Continuation):
 
     steps: List[Step]
-
-    def __init__(self, *, steps: List[Step]):
-        super().__init__()
-        self.steps = steps
 
     @contextmanager
     def impl(self) -> Iterator[None]:

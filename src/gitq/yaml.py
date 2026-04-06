@@ -31,33 +31,23 @@ def represent_value(value, dumper: yaml.Dumper):
 class YAMLObject(yaml.YAMLObject, metaclass=YAMLObjectMetaclass):
 
     # Override to_yaml to customize the yaml representation.
-    #   * Order of fields is as declared in the dataclass (or lexical order for non-dataclasses).
+    #   * Order of fields is as declared in the dataclass
     #   * Fields marked yaml_exclude are skipped.
     #   * False values are skipped.
     #   * Multiline strings are represented with pipe-style yaml strings.
     @classmethod
     def to_yaml(cls, dumper: yaml.Dumper, data: Self):
         excluded = yaml_excluded_fields(cls)
-        if is_dataclass(cls):
+        assert is_dataclass(cls), cls.__name__
 
-            def i():
-                for f in fields(cls):
-                    if f.name in excluded:
-                        continue
-                    value = getattr(data, f.name)
-                    if value is None:
-                        continue
-                    yield (dumper.represent_data(f.name), represent_value(value, dumper))
-
-        else:
-
-            def i():
-                for key, value in sorted(data.__dict__.items()):
-                    if key in excluded:
-                        continue
-                    if value is None:
-                        continue
-                    yield (dumper.represent_data(key), represent_value(value, dumper))
+        def i():
+            for f in fields(cls):
+                if f.name in excluded:
+                    continue
+                value = getattr(data, f.name)
+                if value is None:
+                    continue
+                yield (dumper.represent_data(f.name), represent_value(value, dumper))
 
         return yaml.MappingNode(cls.yaml_tag, list(i()))
 

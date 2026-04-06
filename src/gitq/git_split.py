@@ -4,19 +4,19 @@ import sys
 import argparse
 from contextlib import contextmanager
 from typing import Iterator
+from dataclasses import dataclass, field
 
 from . import continuations
 from .continuations import Continuation, EditBranch, Suspend, Abort
 from .git_swap import edit_commit, PickCherryWithReference
 
 
+@dataclass
 class SuspendForAmend(Continuation):
     """Suspend after the inner block completes, so the user can run
     `git commit --amend` before continuing."""
 
-    def __init__(self, *, done: bool = False):
-        super().__init__()
-        self.done = done
+    done: bool = field(default=False)
 
     @contextmanager
     def impl(self) -> Iterator[None]:

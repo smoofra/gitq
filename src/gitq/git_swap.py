@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import List, Optional, Iterator, TypeVar, NoReturn
 import argparse
 from textwrap import dedent
+from dataclasses import dataclass, field
 
 from .continuations import (
     Abort,
@@ -55,12 +56,11 @@ class Fixup(Resume):
 # order of two commits, we want the resulting tree to be the same.  This means
 # the user should only need to resolve conflicts once, when the now-first commit
 # is applied.
+@dataclass
 class PickCherryWithReference(Continuation):
 
-    def __init__(self, *, cherry: str, reference: str):
-        super().__init__()
-        self.cherry = cherry
-        self.reference = reference
+    cherry: str
+    reference: str
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -70,12 +70,11 @@ class PickCherryWithReference(Continuation):
 
 
 # Handle the case when the user calls `git swap --squash`, etc..
+@dataclass
 class OrSquash(Continuation):
 
-    def __init__(self, *, head: str, stop: bool):
-        super().__init__()
-        self.head = head
-        self.stop = stop
+    head: str
+    stop: bool
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -121,11 +120,10 @@ class OrSquash(Continuation):
 
 
 # restore git state if swap failed
+@dataclass
 class SwapCheckpoint(Continuation):
 
-    def __init__(self, *, head: str):
-        super().__init__()
-        self.head = head
+    head: str
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -138,19 +136,12 @@ class SwapCheckpoint(Continuation):
 
 
 # after ...AB as been swapped to ...BA, keep trying to push B down further
+@dataclass
 class KeepGoing(Continuation):
 
-    def __init__(
-        self,
-        *,
-        edit: bool = False,
-        baselines: List[str],
-        cherries: List[str] | None = None,
-    ):
-        super().__init__()
-        self.edit = edit
-        self.baselines = baselines
-        self.cherries = cherries or list()
+    baselines: List[str]
+    cherries: List[str] = field(default_factory=list)
+    edit: bool = field(default=False)
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -170,12 +161,11 @@ class KeepGoing(Continuation):
             return
 
 
+@dataclass
 class KeepGoingUp(Continuation):
 
-    def __init__(self, *, edit: bool = False, cherries: List[str]):
-        super().__init__()
-        self.edit = edit
-        self.cherries = cherries
+    cherries: List[str]
+    edit: bool = field(default=False)
 
     @contextmanager
     def impl(self) -> Iterator:
