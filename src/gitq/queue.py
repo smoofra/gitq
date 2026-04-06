@@ -187,17 +187,6 @@ class Queue:
         [base] = bases
         return base
 
-    # TODO check first if the baseline branches themselves are queues
-    # managed by this tool.  If they are, check if they need to be rebased
-    # first.   If so, rebase them.   Remember, rebasing can suspend, so the
-    # sequence of operations must be implemented using continuation
-    # abstractions, not just a regular python function.   Hopefully Then
-    # and Step can be used for this.
-    #
-    # This is probably best implemented with a planing phase first in
-    # regular python, which generates a series of operations that can be
-    # sequenced using Then.
-
     def rebase(self, onto: List[Baseline] | None = None) -> None:
         Rebase(onto).run()
 
