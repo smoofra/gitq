@@ -53,12 +53,14 @@ class Fixup(Resume):
     """
 
 
-# Pick a cherry, resolving conflicts using a reference commit.  When we swap the
-# order of two commits, we want the resulting tree to be the same.  This means
-# the user should only need to resolve conflicts once, when the now-first commit
-# is applied.
 @dataclass
 class PickCherryWithReference(Continuation):
+    """
+    Pick a cherry, resolving conflicts using a reference commit.  When we swap the
+    order of two commits, we want the resulting tree to be the same.  This means
+    the user should only need to resolve conflicts once, when the now-first commit
+    is applied.
+    """
 
     cherry: str
     reference: str
@@ -70,9 +72,9 @@ class PickCherryWithReference(Continuation):
         self.git("commit", "--allow-empty", "--reuse-message", self.cherry)
 
 
-# Handle the case when the user calls `git swap --squash`, etc..
 @dataclass
 class OrSquash(Continuation):
+    "Handle the case when the user calls `git swap --squash`, etc.."
 
     head: str
     stop: bool
@@ -120,9 +122,9 @@ class OrSquash(Continuation):
             raise NotImplementedError
 
 
-# restore git state if swap failed
 @dataclass
 class SwapCheckpoint(Continuation):
+    "Restore git state if swap failed."
 
     head: str
 
@@ -136,9 +138,9 @@ class SwapCheckpoint(Continuation):
             raise
 
 
-# after ...AB as been swapped to ...BA, keep trying to push B down further
 @dataclass
 class KeepGoing(Continuation):
+    "After ...AB has been swapped to ...BA, keep trying to push B down further."
 
     baselines: List[str]
     cherries: List[str] = field(default_factory=list)
@@ -197,9 +199,9 @@ def collect_cherries(commit: Optional[Commit], *, git: Git) -> List[str]:
             raise UserError(f"Error: {e}") from e
 
 
-# move HEAD to the specified commit, yield, then cherry-pick everything above it
 @contextmanager
 def edit_commit(commit: Optional[Commit], *, git: Git, edit: bool = False):
+    "Move HEAD to the specified commit, yield, then cherry-pick everything above it."
     if not commit:
         yield
         return
@@ -209,8 +211,8 @@ def edit_commit(commit: Optional[Commit], *, git: Git, edit: bool = False):
         yield
 
 
-# swap HEAD with HEAD^
 def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
+    "Swap HEAD with HEAD^."
     one = git.commit("HEAD")
     try:
         two = git.unique_parent(one)
@@ -237,8 +239,8 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
                     raise
 
 
-# swap HEAD or HEAD^, or squash them together if the user resumes with `--squash`
 def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str], stop: bool) -> None:
+    "Swap HEAD or HEAD^, or squash them together if the user resumes with `--squash`."
     head = git.commit("HEAD")
     with OrSquash(head=head.sha, stop=stop):
         swap(edit=edit, git=git, baselines=baselines)

@@ -12,10 +12,14 @@ from .yaml import YAMLObject, BaseLoader
 
 
 class Loader(BaseLoader):
+    "YAML loader for .git/continuation.yaml"
+
     pass
 
 
 class Dumper(yaml.Dumper):
+    "YAML dumper for .git/continuation.yaml"
+
     pass
 
 
@@ -58,28 +62,30 @@ class Abort(Exception):
     """
 
 
-# A continuation is  is a context manager that can be suspended, serialized
-# out to yaml, and then resumed in a subsequent execution of this program.
-#
-# This is a very low-tech approach to serializeable continuations, and it
-# relies on suspendable code being written in a strange idiom to work.
-#
-# Anything that needs to happen after a resume needs to be expressed as a
-# stack of `Continuation` instances, rather than ordinary function calls.
-#
-# A continuation class must:
-#
-#   * be a dataclass with only serializable attributes
-#
-#   * implement a context manager overriding `.impl()`
-#
-#   * be prepared to reconstruct the execution state of `.impl()`, if it
-#     calls anything that might raise Suspend.   In other words, there is
-#     no magic here that somehow serializes the python execution state.
-#     Each `Continuation` instance is just going to be reanimated based on
-#     its serializeable attributes, and resume again from the yield.
-#
 class Continuation(Generic[T], YAMLObject):
+    """
+    A continuation is  is a context manager that can be suspended,
+    serialized out to yaml, and then resumed in a subsequent execution of
+    this program.
+
+    This is a very low-tech approach to serializeable continuations, and it
+    relies on suspendable code being written in a strange idiom to work.
+
+    Anything that needs to happen after a resume needs to be expressed as a
+    stack of `Continuation` instances, rather than ordinary function calls.
+
+    A continuation class must:
+
+      * be a dataclass with only serializable attributes
+
+      * implement a context manager overriding `.impl()`
+
+      * be prepared to reconstruct the execution state of `.impl()`, if it
+        calls anything that might raise Suspend.   In other words, there is
+        no magic here that somehow serializes the python execution state.
+        Each `Continuation` instance is just going to be reanimated based
+        on its serializeable attributes, and resume again from the yield.
+    """
 
     yaml_loader = Loader
     yaml_dumper = Dumper
@@ -401,6 +407,7 @@ class Step(YAMLObject):
 
 @dataclass
 class Then(Continuation):
+    "Perform a list of steps in order"
 
     steps: List[Step]
 

@@ -13,7 +13,7 @@ class YAMLObjectMetaclass(yaml.YAMLObjectMetaclass):
 
 
 def yaml_excluded_fields(cls) -> set[str]:
-    """Return the set of attribute names marked yaml_exclude via dataclasses.field()."""
+    "Return the set of attribute names marked yaml_exclude via dataclasses.field()."
     excluded = set()
     for klass in cls.__mro__:
         for attr_name, attr_val in vars(klass).items():

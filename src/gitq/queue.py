@@ -194,7 +194,7 @@ class Queue:
 
     @classmethod
     def needs_rebase(cls, ref: str | None) -> bool:
-        """Return True if the local queue branch at ref has baselines that have been updated."""
+        "Return True if the local queue branch at ref has baselines that have been updated."
         if ref is None or not ref.startswith("refs/heads/"):
             return False
         git = contextGit.get()
@@ -211,6 +211,8 @@ class Queue:
 
 @dataclass
 class RebaseBranch(Step):
+    "Temporarily checkout a the specified branch and rebase it."
+
     ref: str
 
     def run(self):
@@ -220,6 +222,7 @@ class RebaseBranch(Step):
 
 @dataclass
 class RebaseOne(Step):
+    "Rebase a single branch (not recursive)."
 
     onto: List[Baseline] | None
 
@@ -240,6 +243,11 @@ class RebaseOne(Step):
 
 @dataclass
 class Rebase(Step):
+    """
+    Recursively rebase a queue branch
+      * First, rebase any baselines which are also queue branches
+      * Then rebase the current branch
+    """
 
     onto: None | List[Baseline] = field(default=None)
 
