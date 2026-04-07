@@ -192,6 +192,9 @@ class Queue:
         with Output.heading("rebasing"):
             Rebase(onto).run()
 
+    # TODO if baseline is a remote branch, but there is a local branch
+    # tracking it, detect that.
+
     @classmethod
     def needs_rebase(cls, ref: str | None) -> bool:
         "Return True if the local queue branch at ref has baselines that have been updated."
