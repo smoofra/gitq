@@ -64,28 +64,28 @@ def test_two_baselines(repo: Git):
 
 def test_rebase_merge(repo: Git):
     repo.w("a", "a")
-    repo.s("git add a && git commit -m a")
+    repo.s("git add a && git commit -q -m a")
     repo.s("git branch base HEAD")
 
     repo.s("git queue init base")
     q0 = repo.rev_parse("HEAD")
 
     repo.w("b", "b")
-    repo.s("git add b && git commit -m b")
+    repo.s("git add b && git commit -q -m b")
 
-    repo.s(f"git checkout {q0}")
+    repo.s(f"git checkout -q {q0}")
     repo.w("c", "c")
-    repo.s("git add c && git commit -m c")
+    repo.s("git add c && git commit -q -m c")
 
-    repo.s("git checkout master")
-    repo.s("git merge HEAD@{1}")
+    repo.s("git checkout -q master")
+    repo.s("git merge HEAD@{1} -qm merge")
 
-    repo.s("git checkout base")
+    repo.s("git checkout -q base")
     repo.w("a", "A")
-    repo.s("git commit -a --amend -m A")
+    repo.s("git commit -qa --amend -m A")
     base1 = repo.rev_parse("HEAD")
 
-    repo.s("git checkout master")
+    repo.s("git checkout -q master")
     repo.s("git queue rebase")
 
     assert repo.log() == ["A", "baseline", "b", "c"]

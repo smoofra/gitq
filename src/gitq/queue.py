@@ -58,8 +58,20 @@ def message(m: str, title: str | None):
         return f"{m}\n\n{trailers}"
 
 
+# FIXME this was used improperly as a test for baseline commits. Check
+# existing callers to figure out what they really mean by it and make it
+# more specific.
+
+
 def from_this_tool(c: Commit) -> bool:
     return c.message.rstrip().endswith("\nTool: gitq")
+
+
+def is_merged_baseline(c: Commit) -> bool:
+    m = c.message.strip()
+    return m.endswith("\nTool: gitq") and (
+        m.startswith("baseline") or m.startswith("merged baselines")
+    )
 
 
 class NotAQueue(UserError):
@@ -138,15 +150,6 @@ class Queue:
         self.git("branch", branch, "HEAD")
         self.git.checkout(branch)
 
-    def duplicates(self, branch: str, base: str, new_base: str) -> Iterator[str]:
-        """
-        Yield commits in base..branch which are cherry-picked into new_base
-        """
-        for line in self.git("cherry", new_base, branch, base, quiet=True).strip().splitlines():
-            sign, sha = line.split(" ", 1)
-            if sign == "-":
-                yield sha
-
     def find_patches(
         self, branch: str, baselines: List[Baseline], new_base: str
     ) -> Iterator[Commit]:
@@ -154,9 +157,14 @@ class Queue:
             return
         commits = self.git.commits(*(f"^{b.sha}" for b in baselines), branch, reverse=True)
         base = self.find_baseline(commits)
-        dups = set(self.duplicates(branch, base, new_base))
+        # We use the + side instead of the - side of the `git cherry`
+        # output to detect duplicates, because if we used the - side, then
+        # it would only filter out distinct (different sha) commits that
+        # are duplicated, but it does not filter out commits that are
+        # literally present (same sha) in both branch and new_base.
+        new = set(r.sha for r in self.git.find_duplicates(base, branch, new_base) if r.is_new)
         for commit in commits:
-            if commit.sha in dups:
+            if commit.sha not in new:
                 continue
             if from_this_tool(commit):
                 continue
@@ -180,7 +188,11 @@ class Queue:
                 yield commit.sha
 
     def find_baseline(self, commits: List[Commit]) -> str:
-        merges = [c.sha for c in commits if from_this_tool(c)]
+        merges = [c.sha for c in commits if is_merged_baseline(c)]
+        if len(merges) == 0:
+            if len(commits[0].parents) != 1:
+                raise NotImplementedError
+            return commits[0].parents[0]
         bases = self.git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
         if len(bases) > 1:
             # TODO make a throwaway merge here

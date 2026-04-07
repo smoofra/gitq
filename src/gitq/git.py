@@ -39,6 +39,17 @@ def split_author(line: str) -> AuthorDate:
     return AuthorDate(m.group(1), m.group(2), m.group(3))
 
 
+class DupRecord(NamedTuple):
+    "a record output by `git cherry`"
+
+    is_new: bool
+    sha: str
+
+    @property
+    def is_duplicate(self):
+        return not self.is_new
+
+
 class Commit(object):
 
     parents: List[str]
@@ -269,3 +280,10 @@ class Git:
         self("checkout", "--", ".")
         for rel in deleted:
             (self.directory / rel).unlink()
+
+    def find_duplicates(self, base: str, branch: str, onto: str) -> Iterator[DupRecord]:
+        "Determine which commits in base..branch are cherry-picked in onto"
+        for line in self("cherry", onto, branch, base, quiet=True).strip().splitlines():
+            sign, sha = line.split(" ", 1)
+            assert sign in "-+"
+            yield DupRecord(sign == "+", sha)
