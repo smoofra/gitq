@@ -271,7 +271,7 @@ def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
         return baseline
     elif baseline.remote:
         if baseline.ref.startswith("refs/heads/") and (remote := git.find_remote(baseline.remote)):
-            git.cmd(["git", "fetch", remote])
+            git.fetch(remote)
             branch = baseline.ref.removeprefix("refs/heads/")
             fetched = f"refs/remotes/{remote}/{branch}"
         else:

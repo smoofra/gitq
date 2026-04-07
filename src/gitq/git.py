@@ -81,8 +81,10 @@ class Git:
 
     gitdir: Path
     directory: Path
+    fetched: Set[str]
 
     def __init__(self, directory=None):
+        self.fetched = set()
         self.directory = Path(directory or ".")
         try:
             top = self.cmd(
@@ -244,6 +246,12 @@ class Git:
             if urlpart == f"{url} (fetch)":
                 return name
         return None
+
+    def fetch(self, remote: str):
+        if remote in self.fetched:
+            return
+        self.cmd(["git", "fetch", remote])
+        self.fetched.add(remote)
 
     def is_conflicted(self, commit: Commit) -> bool:
         try:
