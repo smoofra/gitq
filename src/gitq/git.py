@@ -239,7 +239,7 @@ class Git:
         return {line.strip().split("\t", 1)[1] for line in lines}
 
     def find_remote(self, url: str) -> str | None:
-        for line in self.cmd(["git", "remote", "-v"], quiet=True):
+        for line in self.cmd(["git", "remote", "-v"], quiet=True).splitlines():
             name, urlpart = line.rstrip().split("\t")
             if urlpart == f"{url} (fetch)":
                 return name
