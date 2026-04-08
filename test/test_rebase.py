@@ -296,3 +296,68 @@ def test_rebase2_cherry(repo: Git):
     repo.s("git queue rebase")
 
     assert repo.log() == ["0", "a", "c", "b", "merged baselines", "d"]
+
+
+def test_queuefile_conflict(repo: Git):
+    "Test that git-queue can resolve conflicts on .git-queue automatically"
+    repo.c("0")
+
+    # Two independent base branches so each queue records a different baseline sha
+    repo.s("git checkout -qb base_a")
+    repo.c("a")
+    repo.s("git checkout -q master")
+    repo.s("git checkout -qb base_b")
+    repo.c("b")
+    repo.s("git checkout -q master")
+
+    # foo's .git-queue records sha of "a"; bar's records sha of "b"
+    repo.s("git queue init -b foo base_a")
+    repo.s("git queue init -b bar base_b")
+
+    # Create baz with foo as its baseline
+    repo.s("git queue init -b baz foo")
+    repo.c("baz patch")
+
+    repo.s("git queue add bar")
+    assert repo.log() == ["0", "a", "baseline", "b", "baseline", "merged baselines", "baz patch"]
+
+
+def test_queuefile_conflict_3way(repo: Git):
+    "Test .git-queue conflict resolution when octopus merge fails"
+    repo.c("0")
+
+    repo.s("git checkout -qb base_a")
+    repo.c("a")
+    repo.s("git checkout -q master")
+    repo.s("git checkout -qb base_b")
+    repo.c("b")
+    repo.s("git checkout -q master")
+    repo.s("git checkout -qb base_c")
+    repo.c("c")
+    repo.s("git checkout -q master")
+
+    # Three queues, each recording a different baseline sha
+    repo.s("git queue init -b foo base_a")
+    repo.s("git queue init -b bar base_b")
+    repo.s("git queue init -b qux base_c")
+
+    # Create baz with foo as its baseline
+    repo.s("git queue init -b baz foo")
+    repo.c("baz patch")
+
+    # Adding two baselines at once: octopus merge refuses the 3-way .git-queue
+    # conflict without setting MERGE_HEAD, so the code falls through to the
+    # one-at-a-time loop which resolves each .git-queue conflict individually.
+    repo.s("git queue add bar qux")
+    assert repo.log() == [
+        "0",
+        "a",
+        "baseline",
+        "b",
+        "baseline",
+        "merged baselines",
+        "c",
+        "baseline",
+        "merged baselines",
+        "baz patch",
+    ]

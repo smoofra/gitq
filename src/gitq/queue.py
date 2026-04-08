@@ -99,12 +99,15 @@ class Queue:
             with open(self.queuefile_path, "r") as f:
                 self.qf = yaml.load(f, Loader=Loader)
 
-    def save_queuefile(self, *, amend: bool):
-        assert amend
+    def save_queuefile(self, *, amend: bool = False, message: str = ""):
+        assert amend ^ bool(message)
         with open(self.queuefile_path, "w") as f:
             yaml.dump(self.qf, f, Dumper=Dumper)
         self.git("add", self.queuefile_path)
-        self.git("commit", "--amend", "-C", "HEAD")
+        if amend:
+            self.git("commit", "--amend", "-C", "HEAD")
+        else:
+            self.git("commit", "-m", message)
 
     def merge_baselines(self) -> Commit:
 
@@ -120,22 +123,32 @@ class Queue:
 
         refs = [b.sha for b in baselines]
 
+        m = message("merged baselines", self.qf.title)
+
+        # try octopus merge first
         try:
-            self.git("merge", "--no-ff", *refs, "-m", message("merged baselines", self.qf.title))
+            self.git("merge", "--no-ff", *refs, "-m", m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
+                if self.git.unmerged_files() == {self.queuefile_name}:
+                    self.save_queuefile(message=m)
+                    return self.git.commit("HEAD")
                 self.git("merge", "--abort")
         else:
             self.save_queuefile(amend=True)
             return self.git.commit("HEAD")
 
+        # merge one at a time
         for ref in refs:
             try:
-                m = message("merged baselines", self.qf.title)
-                self.git.cmd(["git", "merge", "--no-ff", ref, "-m", m])
+                self.git("merge", "--no-ff", ref, "-m", m)
             except GitFailed:
-                if (self.git.gitdir / "MERGE_HEAD").exists():
-                    self.git("merge", "--abort")
+                if not (self.git.gitdir / "MERGE_HEAD").exists():
+                    raise
+                if self.git.unmerged_files() == {self.queuefile_name}:
+                    self.save_queuefile(message=m)
+                    continue
+                self.git("merge", "--abort")
                 raise
 
         self.save_queuefile(amend=True)
