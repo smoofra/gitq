@@ -18,6 +18,7 @@ git-queue = "gitq.git_queue:main"
 git-squash = "gitq.git_squash:main"
 git-edit = "gitq.git_edit:main"
 git-split = "gitq.git_split:main"
+git-drop = "gitq.git_drop:main"
 
 [build-system]
 requires = ["hatchling"]
