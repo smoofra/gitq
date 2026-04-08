@@ -131,7 +131,8 @@ class Queue:
 
         for ref in refs:
             try:
-                self.git.cmd(["git", "merge", "--no-ff", ref])
+                m = message("merged baselines", self.qf.title)
+                self.git.cmd(["git", "merge", "--no-ff", ref, "-m", m])
             except GitFailed:
                 if (self.git.gitdir / "MERGE_HEAD").exists():
                     self.git("merge", "--abort")
