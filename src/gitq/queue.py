@@ -178,15 +178,14 @@ class Queue:
         # literally present (same sha) in both branch and new_base.
         new = set(r.sha for r in self.git.find_duplicates(base, branch, new_base) if r.is_new)
         for commit in commits:
-            if commit.sha not in new:
-                continue
             if from_this_tool(commit):
                 continue
             if commit.is_merge:
                 if self.git.is_conflicted(commit):
-                    continue
-                else:
-                    raise UserError("rebasing merges is not implemented yet")
+                    raise UserError(f"rebasing merges is not implemented yet: {commit.summary}")
+                continue
+            if commit.sha not in new:
+                continue
             changed = self.git("show", "--name-only", "--pretty=", commit.sha, quiet=True).strip()
             if changed == self.queuefile_name:
                 continue
@@ -201,13 +200,12 @@ class Queue:
             if from_this_tool(commit):
                 yield commit.sha
 
-    def find_git_cherry_limit(self, commits: List[Commit]) -> str:
+    def find_git_cherry_limit(self, commits: List[Commit]) -> str | None:
         "Find the 'baseline' or 'merged baselines' commit in the queue"
         merges = [c.sha for c in commits if is_merged_baseline(c)]
         if len(merges) == 0:
-            if len(commits[0].parents) != 1:
-                raise NotImplementedError
-            return commits[0].parents[0]
+            # See below, just pick some limit.  Can't return them all
+            return commits[0].parents[0] if commits[0].parents else None
         bases = self.git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
         # This is only used to provide a limit to `git cherry`.   If there
         # are multiple baselines, then `git cherry` may produce additional

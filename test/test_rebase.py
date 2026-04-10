@@ -64,6 +64,8 @@ def test_two_baselines(repo: Git):
 
 
 def test_rebase_merge(repo: Git):
+    "Test that rebase can skip over non-conflicted merges"
+
     repo.w("a", "a")
     repo.s("git add a && git commit -q -m a")
     repo.s("git branch base HEAD")
@@ -91,6 +93,53 @@ def test_rebase_merge(repo: Git):
 
     assert repo.log() == ["A", "baseline", "b", "c"]
     assert [b.sha for b in repo.q.baselines] == [base1]
+
+
+def test_rebase_conflicted_merge(repo: Git):
+    "Test that rebase prints an error when the queue contains a merge with conflicts"
+
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.s("git queue init base")
+    q0 = repo.rev_parse("HEAD")
+
+    repo.c("b")
+
+    repo.s(f"git checkout -q {q0}")
+    repo.c("b", content="B")
+    other = repo.rev_parse("HEAD")
+
+    repo.s("git checkout -q master")
+
+    # create a merge with resolved conflicts
+    repo.s(f"git merge --no-commit -q {other}; [[ $? = 1 ]]")
+    repo.s("echo bB>b && git add b && git commit -q -m merge")
+
+    repo.s("git queue rebase | grep 'rebasing merges is not implemented yet'")
+
+
+def test_rebase_edited_merge(repo: Git):
+    "Test that rebase prints an error when the queue contains a merge manual edits"
+
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.s("git queue init base")
+    q0 = repo.rev_parse("HEAD")
+
+    repo.c("b")
+
+    repo.s(f"git checkout -q {q0}")
+    repo.c("c")
+    other = repo.rev_parse("HEAD")
+
+    repo.s("git checkout -q master")
+
+    # create a merge with manual edits
+    repo.s(f"git merge -q {other} -m merge")
+    repo.w("c", "C")
+    repo.s("git commit -q -a --amend -C HEAD")
+
+    repo.s("git queue rebase | grep 'rebasing merges is not implemented yet'")
 
 
 @pytest.mark.parametrize("case", ["normal", "wrong_tool", "abort"])
@@ -360,6 +409,31 @@ def test_rebase_independent_baselines(repo: Git):
     # rebase should still work!
     repo.s("git queue rebase")
     assert repo.log() == ["0", "a", "b", "merged baselines", "patch_b", "patch_a"]
+
+
+def test_rebase_merge_limit(repo: Git):
+    """
+    Test that rebase can deal with a non-conflicted merge at the bottom of the queue.
+    This is a special case in find_git_cherry_limit
+    """
+    repo.c("0")
+
+    repo.s("git checkout -qb a master")
+    repo.c("a")
+
+    repo.s("git checkout -qb b master")
+    repo.c("b")
+
+    # make a regular merge commit
+    repo.s("git checkout -qb work a")
+    repo.s("git merge -q b --no-ff -m 'merge b'")
+
+    # make a weird queue starting at the merge
+    repo.s("git queue init a b")
+    repo.c("patch")
+
+    repo.s("git queue rebase")
+    assert repo.log() == ["0", "a", "b", "merged baselines", "patch"]
 
 
 def test_queuefile_conflict_3way(repo: Git):

@@ -296,9 +296,9 @@ class Git:
             tree = self("merge-tree", "--name-only", *commit.parents, quiet=True).strip()
         except GitFailed as e:
             if e.rc == 1:
-                return False
+                return True
             raise
-        return self.cmd_test(["git", "diff", "--quiet", commit.sha, tree, "--"])
+        return not self.cmd_test(["git", "diff", "--quiet", commit.sha, tree, "--"])
 
     def checkout_tree(self, tree: str) -> None:
         "replace index and working files with the specified tree"
@@ -308,9 +308,13 @@ class Git:
         for rel in deleted:
             (self.directory / rel).unlink()
 
-    def find_duplicates(self, base: str, branch: str, onto: str) -> Iterator[DupRecord]:
+    def find_duplicates(self, base: str | None, branch: str, onto: str) -> Iterator[DupRecord]:
         "Determine which commits in base..branch are cherry-picked in onto"
-        for line in self("cherry", onto, branch, base, quiet=True).strip().splitlines():
+        if base is None:
+            output = self("cherry", onto, branch, quiet=True)
+        else:
+            output = self("cherry", onto, branch, base, quiet=True)
+        for line in output.strip().splitlines():
             sign, sha = line.split(" ", 1)
             assert sign in "-+"
             yield DupRecord(sign == "+", sha)
