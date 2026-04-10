@@ -104,8 +104,6 @@ class Main(continuations.Main):
             description="Abort a suspended operation and restore previous state.",
         )
 
-        # TODO add subcommand to add and remove baselines
-
         args = parser.parse_args()
         if args.command is None:
             parser.print_usage()
