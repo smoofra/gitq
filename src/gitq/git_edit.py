@@ -8,14 +8,23 @@ from .continuations import EditBranch, Suspend, Abort
 from .git_swap import edit_commit
 
 
+description = """
+Detaches HEAD at COMMIT, suspending so the user can amend it. When done,
+resume with `git edit --continue` to replay all commits that were above
+COMMIT back on top.
+"""
+
+
 class Main(continuations.Main):
 
     tool = "git-edit"
     suspend_message = "Suspended! edit HEAD, then resume with `git edit --continue`"
 
     def main(self):
-        parser = argparse.ArgumentParser(description="edit a commit")
-        parser.add_argument("commit", nargs="?")
+        parser = argparse.ArgumentParser(
+            description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+        )
+        parser.add_argument("commit", nargs="?", metavar="COMMIT")
         parser.add_argument(
             "--continue",
             "-c",

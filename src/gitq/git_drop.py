@@ -9,14 +9,19 @@ from .git import UserError
 from .git_swap import collect_cherries, CheckoutBaseline
 
 
+description = """
+Delete a commit from history, replaying all commits above it.
+"""
+
+
 class Main(continuations.Main):
 
     tool = "git-drop"
     suspend_message = "Suspended! Resolve conflicts and resume with `git drop --continue`"
 
     def main(self):
-        parser = argparse.ArgumentParser(description="delete a commit")
-        parser.add_argument("commit", nargs="?")
+        parser = argparse.ArgumentParser(description=description)
+        parser.add_argument("commit", nargs="?", metavar="COMMIT")
         parser.add_argument("--continue", "-c", action="store_true", dest="resume")
         parser.add_argument("--edit", "-e", action="store_true")
         parser.add_argument("--abort", action="store_true")

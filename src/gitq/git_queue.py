@@ -24,35 +24,85 @@ def parse_baseline(ref: str, *, git: Git) -> Baseline:
         return Baseline(sha, full_name, None)
 
 
+description_init = """
+Initialize a queue on the current branch (or a new branch with -b),
+with one or more baselines.  Each BASELINE is a branch, tag, or commit.
+"""
+
+description_rebase = """
+Rebase the queue onto its baselines, incorporating any upstream changes.
+If a baseline branch is itself a queue managed by this tool, it will be
+recursively rebased first.
+
+Use --add to incorporate an additional baseline, or --remove to drop one,
+at the same time as rebasing.
+
+If conflicts arise during cherry-picking, the operation suspends so the user
+can resolve them, then resume with `git queue continue`.
+"""
+
+
 class Main(continuations.Main):
 
     tool = "git-queue"
     suspend_message = "Suspended! Resolve conflicts and resume with `git queue continue`"
 
     def main(self) -> None:
-        parser = argparse.ArgumentParser("git-queue", description="manage a bunch of patches")
+        parser = argparse.ArgumentParser(
+            "git-queue",
+            description="manage a bunch of patches",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
         subs = parser.add_subparsers(dest="command")
 
-        init_parser = subs.add_parser("init", help="initialize a queue")
-        init_parser.add_argument("baselines", action="extend", nargs="+", metavar="baseline")
+        init_parser = subs.add_parser(
+            "init",
+            help="initialize a queue",
+            description=description_init,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
+        init_parser.add_argument("baselines", action="extend", nargs="+", metavar="BASELINE")
         init_parser.add_argument("--title")
-        init_parser.add_argument("--branch", "-b")
+        init_parser.add_argument("--branch", "-b", help="make a new branch")
 
-        add_parser = subs.add_parser("add", help="add a baseline")
-        add_parser.add_argument("add", action="extend", nargs="+", metavar="baseline")
+        add_parser = subs.add_parser(
+            "add",
+            help="add a baseline",
+            description="Add baselines and rebase.",
+        )
+        add_parser.add_argument("add", action="extend", nargs="+", metavar="BASELINE")
 
-        remove_parser = subs.add_parser("remove", help="remove a baseline")
-        remove_parser.add_argument("remove", action="extend", nargs="+", metavar="baseline")
+        remove_parser = subs.add_parser(
+            "remove", help="remove a baseline", description="Remove baselines and rebase."
+        )
+        remove_parser.add_argument("remove", action="extend", nargs="+", metavar="BASELINE")
 
-        rebase_parser = subs.add_parser("rebase", help="rebase queue onto baselines")
-        rebase_parser.add_argument("--add", metavar="baseline", action="append", default=[])
-        rebase_parser.add_argument("--remove", metavar="baseline", action="append", default=[])
+        rebase_parser = subs.add_parser(
+            "rebase",
+            description=description_rebase,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            help="rebase queue onto baselines",
+        )
+        rebase_parser.add_argument("--add", metavar="BASELINE", action="append", default=[])
+        rebase_parser.add_argument("--remove", metavar="BASELINE", action="append", default=[])
 
-        subs.add_parser("tidy", help="normalize .git-queue file")
+        subs.add_parser(
+            "tidy", help="normalize .git-queue file", description="Normalize .git-queue file."
+        )
 
-        subs.add_parser("status")
-        subs.add_parser("continue")
-        subs.add_parser("abort")
+        subs.add_parser(
+            "status", help="print status", description="Print status of a suspended operation."
+        )
+        subs.add_parser(
+            "continue",
+            help="continue suspended operation",
+            description="Continue a suspended operation.",
+        )
+        subs.add_parser(
+            "abort",
+            help="abort suspend operation",
+            description="Abort a suspended operation and restore previous state.",
+        )
 
         # TODO add subcommand to add and remove baselines
 

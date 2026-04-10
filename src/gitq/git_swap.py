@@ -23,6 +23,15 @@ from .output import Output
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
 from .queue import Queue, NotAQueue
 
+description = """Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history),
+while holding the final content constant.
+
+This tool re-orders commits like git rebase -i, but is easier to use. In
+particular, conflicts must often be resolved twice when using rebase, but
+not with git-swap.
+"""
+
+
 T = TypeVar("T")
 
 
@@ -261,7 +270,9 @@ class Main(continuations.Main):
 
     def main(self) -> None:
 
-        parser = argparse.ArgumentParser(description="swap the order of commits")
+        parser = argparse.ArgumentParser(
+            description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+        )
         parser.add_argument(
             "--keep-going",
             "-k",

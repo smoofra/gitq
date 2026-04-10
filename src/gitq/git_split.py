@@ -10,6 +10,20 @@ from . import continuations
 from .continuations import Continuation, EditBranch, Suspend, Abort
 from .git_swap import edit_commit, PickCherryWithReference
 
+description = """
+Splits a single commit into two or more commits. The user can add a
+additional commits, while holding the final content constant.
+
+Checks out COMMIT with its changes staged,  via `git reset --soft HEAD^`,
+suspending so the user can make one or more new commits. After the user
+continues, COMMIT will be restored with its original content, and git-split
+will suspend again so the user can amend the commit message with
+`git commit --amend`.
+
+After continuing again, it replays the remaining commits from above COMMIT
+on top.
+"""
+
 
 @dataclass
 class SuspendForAmend(Continuation):
@@ -37,8 +51,10 @@ class Main(continuations.Main):
     suspend_message = "Resume with `git split --continue` when done."
 
     def main(self):
-        parser = argparse.ArgumentParser(description="split a commit")
-        parser.add_argument("commit", nargs="?")
+        parser = argparse.ArgumentParser(
+            description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+        )
+        parser.add_argument("commit", nargs="?", metavar="COMMIT")
         parser.add_argument(
             "--continue",
             "-c",
