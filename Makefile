@@ -2,6 +2,8 @@
 MAX_LINE = 99
 SOURCES = src test
 
+export GIT_QUEUE_TEMP_REPO=
+
 .PHONY: check flake8 black black-check mypy test format lint
 
 check: flake8 black-check mypy test
@@ -23,6 +25,6 @@ mypy:
 	uv run mypy $(SOURCES)
 
 test:
-	uv run pytest
+	uv run pytest -n auto
 
 format: flake8 black

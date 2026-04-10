@@ -86,10 +86,10 @@ class Git(Directory, BaseGit):
 def repo(tmp_path: Path) -> Git:
     Output.print()
 
-    if "GIT_QUEUE_TEMP_REPO" in os.environ:
+    if t := os.environ.get("GIT_QUEUE_TEMP_REPO"):
         if os.environ.get("PYTEST_XDIST_WORKER"):
             raise RuntimeError("GIT_QUEUE_TEMP_REPO cannot be used with parallel tests")
-        tmp_path = Path(os.environ["GIT_QUEUE_TEMP_REPO"])
+        tmp_path = Path(t)
 
     os.makedirs(tmp_path, exist_ok=True)
 
