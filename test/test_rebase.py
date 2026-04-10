@@ -333,6 +333,35 @@ def test_queuefile_conflict(repo: Git):
     assert repo.log() == ["0", "a", "baseline", "b", "baseline", "merged baselines", "baz patch"]
 
 
+def test_rebase_independent_baselines(repo: Git):
+    "see the long comment in find_git_cherry_limit"
+    repo.c("0")
+
+    # branch_a
+    repo.s("git checkout -b branch_a")
+    repo.c("a")
+    sha_a = repo.rev_parse("HEAD")
+    repo.s("git commit --allow-empty -m $'baseline\\n\\nTool: gitq'")
+    repo.c("patch_a")
+
+    # branch_b
+    repo.s("git checkout master")
+    repo.s("git checkout -b branch_b")
+    repo.c("b")
+    sha_b = repo.rev_parse("HEAD")
+    repo.s("git commit --allow-empty -m $'baseline\\n\\nTool: gitq'")
+    repo.c("patch_b")
+
+    # make a weird queue containing merges and independent baselines
+    repo.s("git merge branch_a --no-ff -m 'merge two independent branches'")
+    repo.w(".git-queue", f"baselines:\n- sha: {sha_a}\n- sha: {sha_b}\n")
+    repo.s("git add .git-queue && git commit -m 'setup queue'")
+
+    # rebase should still work!
+    repo.s("git queue rebase")
+    assert repo.log() == ["0", "a", "b", "merged baselines", "patch_b", "patch_a"]
+
+
 def test_queuefile_conflict_3way(repo: Git):
     "Test .git-queue conflict resolution when octopus merge fails"
     repo.c("0")

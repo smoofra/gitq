@@ -170,7 +170,7 @@ class Queue:
         if self.git.on_orphan_branch():
             return
         commits = self.git.commits(*(f"^{b.sha}" for b in baselines), branch, reverse=True)
-        base = self.find_baseline(commits)
+        base = self.find_git_cherry_limit(commits)
         # We use the + side instead of the - side of the `git cherry`
         # output to detect duplicates, because if we used the - side, then
         # it would only filter out distinct (different sha) commits that
@@ -201,18 +201,24 @@ class Queue:
             if from_this_tool(commit):
                 yield commit.sha
 
-    def find_baseline(self, commits: List[Commit]) -> str:
+    def find_git_cherry_limit(self, commits: List[Commit]) -> str:
+        "Find the 'baseline' or 'merged baselines' commit in the queue"
         merges = [c.sha for c in commits if is_merged_baseline(c)]
         if len(merges) == 0:
             if len(commits[0].parents) != 1:
                 raise NotImplementedError
             return commits[0].parents[0]
         bases = self.git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
-        if len(bases) > 1:
-            # TODO make a throwaway merge here
-            raise NotImplementedError
-        [base] = bases
-        return base
+        # This is only used to provide a limit to `git cherry`.   If there
+        # are multiple baselines, then `git cherry` may produce additional
+        # output for baseline commits that should have been excluded.   But
+        # that does not actually matter much, because `git cherry` is only
+        # used to filter out commits from the list produced by `git log`,
+        # and `git log` can take multiple limits.
+        #
+        # Alternatively, we could create a throwaway merge here and use
+        # that as the limit.
+        return bases[0]
 
     def rebase(self, onto: List[Baseline] | None = None) -> None:
         with Output.heading("rebasing"):
