@@ -1,7 +1,7 @@
 import os
 import subprocess
 import re
-from typing import List, Iterator, NamedTuple, Set
+from typing import List, Iterator, NamedTuple, Set, Iterable
 from pathlib import Path
 from contextvars import ContextVar
 
@@ -50,6 +50,21 @@ class DupRecord(NamedTuple):
         return not self.is_new
 
 
+def coalesce(lines: Iterable[str]) -> Iterator[str]:
+    cur = None
+    for line in lines:
+        if cur is None:
+            cur = line
+            continue
+        if line.startswith(" "):
+            cur += line
+            continue
+        yield cur
+        cur = line
+    if cur is not None:
+        yield cur
+
+
 class Commit(object):
 
     parents: List[str]
@@ -57,7 +72,7 @@ class Commit(object):
     def __init__(self, *, log: str):
         self.parents = list()
         (headers, message) = log.split("\n\n", 1)
-        for header in headers.split("\n"):
+        for header in coalesce(headers.split("\n")):
             (key, value) = header.strip().split(" ", 1)
             if key == "commit":
                 self.sha = value
@@ -69,6 +84,8 @@ class Commit(object):
                 self.author = value
             if key == "committer":
                 self.committer = value
+            if key == "gpgsig":
+                continue
         assert message.endswith("\n")
         lines = message[:-1].split("\n")
         assert all(x.startswith("    ") for x in lines)
@@ -77,12 +94,15 @@ class Commit(object):
 
     @property
     def summary(self) -> str:
-        m, _ = self.message.split("\n", 1)
-        return f"{self.sha[:10]} {m}"
+        return f"{self.sha[:10]} {self.title}"
 
     @property
     def is_merge(self) -> bool:
         return len(self.parents) > 1
+
+    @property
+    def title(self) -> str:
+        return self.message.split("\n", 1)[0]
 
     def __str__(self) -> str:
         return self.sha[:10]
