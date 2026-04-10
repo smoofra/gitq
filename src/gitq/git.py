@@ -146,6 +146,15 @@ class Git:
     def detach(self) -> None:
         self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL, comment="detach")
 
+    def upstream(self, branch: str) -> str | None:
+        "return the sha of the branch's upstream, or None"
+        try:
+            return self.rev_parse(branch + "@{upstream}")
+        except GitFailed as e:
+            if "no upstream configured for branch" in str(e):
+                return None
+            raise
+
     def head(self) -> str:
         try:
             return self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True, stderr=FNULL).strip()

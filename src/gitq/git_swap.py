@@ -327,14 +327,16 @@ class Main(continuations.Main):
             return
 
         with self.setup():
+            upstream = self.git.upstream("HEAD")
             with EditBranch(message="git-swap"):
                 if args.up:
                     self.swap_up(args)
                 else:
+                    baselines = [upstream] if upstream else []
                     try:
                         baselines = list(Queue(self.git).baselines_for_swap())
                     except NotAQueue:
-                        baselines = []
+                        pass
                     self.swap_down(args, baselines)
 
     def swap_down(self, args, baselines: List[str]) -> None:

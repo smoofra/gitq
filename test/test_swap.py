@@ -124,6 +124,24 @@ def test_keep_going_baseline(repo: Git):
     assert repo.log() == ["a", "b", "initialized queue", "X", "c", "d", "e"]
 
 
+def test_keep_going_upstream_baseline(repo: Git):
+    for c in "abcde":
+        repo.w(c, c)
+        repo.s("git add .")
+        repo.s(f"git commit -q -m {c}")
+        if c == "b":
+            repo.s("git branch upstream")
+            repo.s("git branch --set-upstream-to=upstream")
+    repo.w("x", "x")
+    repo.s("git add .")
+    repo.s("git commit -q -m X")
+    sha = repo.rev_parse("HEAD")
+    assert repo.log() == ["a", "b", "c", "d", "e", "X"]
+    repo.s("git swap --keep-going")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert repo.log() == ["a", "b", "X", "c", "d", "e"]
+
+
 def test_middle(repo: Git):
     for c in "abcdefg":
         repo.w(c, c)
