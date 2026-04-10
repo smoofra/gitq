@@ -287,3 +287,7 @@ class Git:
             sign, sha = line.split(" ", 1)
             assert sign in "-+"
             yield DupRecord(sign == "+", sha)
+
+    def abbrev(self, ref: str) -> str:
+        "Return abbreviated sha for ref"
+        return self.cmd(["git", "rev-parse", "--short", ref], quiet=True).strip()

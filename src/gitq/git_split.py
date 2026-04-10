@@ -16,6 +16,7 @@ class SuspendForAmend(Continuation):
     """Suspend after the inner block completes, so the user can run
     `git commit --amend` before continuing."""
 
+    target: str
     done: bool = field(default=False)
 
     @contextmanager
@@ -24,8 +25,9 @@ class SuspendForAmend(Continuation):
         if not self.done:
             self.done = True
             raise Suspend(
-                status="Committed. Edit the message with `git commit --amend`\n"
-                + "Then resume with `git split --continue`."
+                status=f"Commit {self.target} was split.\n"
+                + "Edit the message with: git commit --amend\n"
+                + "Then resume with: git split --continue."
             )
 
 
@@ -68,15 +70,19 @@ class Main(continuations.Main):
         with self.setup():
             commit = self.git.commit(args.commit)
             sha = commit.sha
+            target = self.git.abbrev(sha)
+            status = (
+                f"Splitting {target}.\n"
+                + "Changes from the commit are now staged.\n"
+                + "Make one or more commits here, then resume with: git split --continue."
+            )
+
             with EditBranch(message="git-split"):
                 with edit_commit(commit, git=self.git, edit=True):
-                    with SuspendForAmend():
+                    with SuspendForAmend(target):
                         with PickCherryWithReference(cherry=sha, reference=sha):
                             self.git("reset", "--soft", "HEAD^")
-                            raise Suspend(
-                                status="Changes from the commit are now staged.\n"
-                                + "Make one or more commits for the first part of the split."
-                            )
+                            raise Suspend(status=status)
 
 
 main = Main()
