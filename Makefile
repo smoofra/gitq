@@ -2,9 +2,12 @@
 MAX_LINE = 99
 SOURCES = src test
 
-.PHONY: check flake8 black black-check mypy test format
+.PHONY: check flake8 black black-check mypy test format lint
 
 check: flake8 black-check mypy test
+	@ echo ✅
+
+lint: flake8 black-check mypy
 	@ echo ✅
 
 flake8:
