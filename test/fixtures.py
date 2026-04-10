@@ -25,8 +25,8 @@ class Directory:
 
     def s(self, command: str):
         "run a shell command"
-        Output.flush()
         Output.log_cmd(command)
+        Output.flush()
         with Output.indent():
             subprocess.run(command, shell=True, check=True, cwd=self.path, stderr=sys.stdout)
 
