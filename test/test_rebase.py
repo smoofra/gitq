@@ -1,3 +1,4 @@
+import pytest
 from .fixtures import Git, repo
 
 _ = repo
@@ -92,7 +93,8 @@ def test_rebase_merge(repo: Git):
     assert [b.sha for b in repo.q.baselines] == [base1]
 
 
-def test_rebase_conflict(repo: Git):
+@pytest.mark.parametrize("case", ["normal", "wrong_tool", "abort"])
+def test_rebase_conflict(repo: Git, case):
     repo.w("a", "a")
     repo.s("git add a && git commit -q -m a")
     repo.s("git branch base HEAD")
@@ -126,7 +128,16 @@ def test_rebase_conflict(repo: Git):
     assert repo.unmerged() == {"c"}
     repo.w("c", "c")
     repo.s("git add c")
-    repo.s("git queue continue")
+    if case == "normal":
+        repo.s("git queue continue")
+    elif case == "wrong_tool":
+        # test calling continue from the wrong tool
+        repo.s("git edit --continue")
+    else:
+        repo.s("git edit --abort")
+        assert repo.rev_parse("HEAD") == sha
+        assert repo.head() == "refs/heads/master"
+        return
 
     assert repo.log() == ["A", "baseline", "b", "c"]
     assert [b.sha for b in repo.q.baselines] == [base1]

@@ -14,12 +14,18 @@ def test_split(repo: Git):
 
     repo.s("git split HEAD; [[ $? = 2 ]]")
 
+    # check status message contains ref to the split target
+    repo.s("git split --status | grep " + repo.abbrev(sha))
+
     # changes from 'ab' are staged; unstage b and commit just a
     repo.s("git restore --staged b")
     repo.s("git commit -q -m a")
 
     # first continue: commits remaining changes with original message, suspends for amend
     repo.s("git split --continue; [[ $? = 2 ]]")
+
+    # check using wrong tool to get status
+    repo.s("git queue status | grep " + repo.abbrev(sha))
 
     # second continue: done
     repo.s("git split --continue")

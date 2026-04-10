@@ -183,7 +183,9 @@ class Main:
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
 
-        if j.tool != self.tool:
+        # All the commands support continue and abort, so its fine if the
+        # user calls them from the wrong tool.
+        if j.tool != self.tool and throw is not None and not isinstance(throw, Abort):
             raise UserError(f"A {j.tool} operation is currently in progress")
 
         self.git.continuation.unlink()
@@ -204,7 +206,7 @@ class Main:
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
         if j.tool != self.tool:
-            raise UserError(f"{j.tool} operation is in progress, not {self.tool}")
+            Output.print(f"{j.tool} operation is in progress.")
         Output.print(j.status or f"{j.tool} operation is in progress")
 
 
