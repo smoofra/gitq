@@ -17,6 +17,8 @@ __all__ = ["Git", "repo"]
 
 class Directory:
 
+    path: Path
+
     def __init__(self, path: Path):
         self.path = path
 

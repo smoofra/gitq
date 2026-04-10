@@ -18,6 +18,17 @@ def test_swap(repo: Git):
     assert repo.log() == ["0", "x", "a"]
 
 
+def test_swap_subdir(repo: Git):
+    repo.c("a")
+    repo.c("b")
+    assert "".join(repo.log()) == "ab"
+    sha = repo.rev_parse("HEAD")
+    repo.s("mkdir subdir")
+    repo.s("cd subdir && git swap")
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert "".join(repo.log()) == "ba"
+
+
 def test_swap_root(repo: Git):
     repo.w("a", "aaa")
     repo.s("git add .")

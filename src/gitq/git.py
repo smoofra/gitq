@@ -90,23 +90,21 @@ class Commit(object):
 
 class Git:
 
-    gitdir: Path
-    directory: Path
+    gitdir: Path  # .git
+    directory: Path  # toplevel, and where commands are run from
     fetched: Set[str]
 
     def __init__(self, directory=None):
         self.fetched = set()
         self.directory = Path(directory or ".")
         try:
-            top = self.cmd(
-                "git rev-parse --show-toplevel".split(), quiet=True, stderr=FNULL
-            ).strip()
+            top = self("rev-parse", "--show-toplevel", quiet=True).strip()
         except GitFailed as e:
             raise UserError("Error: not a git repository") from e
         if not top:
             raise UserError("Error: cannot find working directory.  bare repository?")
         self.directory = Path(top)
-        self.gitdir = Path(self.cmd("git rev-parse --git-dir".split(), quiet=True).strip())
+        self.gitdir = self.directory / self("rev-parse", "--git-dir", quiet=True).strip()
 
     def cmd(
         self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = "", **kw
