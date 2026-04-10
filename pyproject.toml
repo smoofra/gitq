@@ -39,3 +39,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+
+[tool.uv]
+check-url = "https://pypi.org/simple/"
+keyring-provider = "subprocess"
