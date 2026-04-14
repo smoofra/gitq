@@ -21,6 +21,7 @@ def test_split(repo: Git):
     repo.s("git restore --staged b")
     repo.s("git commit -q -m a")
 
+    # TODO check the status output is reasonable here.
     # first continue: commits remaining changes with original message, suspends for amend
     repo.s("git split --continue; [[ $? = 2 ]]")
 

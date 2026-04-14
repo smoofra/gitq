@@ -264,6 +264,7 @@ class RebaseOne(Step):
         if self.onto is None:
             self.onto = q.qf.baselines
 
+        # FIXME these should not be re-refreshed every time this resumes
         q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
         with EditBranch(message="git-queue rebase") as branch:
             q.merge_baselines()
