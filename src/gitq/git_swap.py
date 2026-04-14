@@ -343,7 +343,7 @@ class Main(continuations.Main):
                 if args.up:
                     self.swap_up(args)
                 else:
-                    baselines = [upstream] if upstream else []
+                    baselines = [upstream] if args.keep_going and upstream else []
                     try:
                         baselines = list(Queue(self.git).baselines_for_swap())
                     except NotAQueue:
