@@ -103,7 +103,7 @@ class Queue:
         assert amend ^ bool(message)
         with open(self.queuefile_path, "w") as f:
             yaml.dump(self.qf, f, Dumper=Dumper)
-        self.git("add", self.queuefile_path)
+        self.git("add", self.queuefile_path.relative_to(self.git.directory))
         if amend:
             self.git("commit", "--amend", "-C", "HEAD")
         else:
