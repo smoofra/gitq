@@ -68,6 +68,16 @@ class Git(Directory, BaseGit):
     def others(self) -> set[str]:
         return set(self("ls-files", "--others").splitlines())
 
+    def print_graph(self, *args: str) -> None:
+        graph = self.cmd(
+            ["git", "log", "-n20", "--graph", "--decorate", "--oneline", "--left-right", *args],
+            quiet=True,
+        )
+        n = max(len(line.rstrip()) for line in graph.splitlines())
+        Output.print("=" * n)
+        Output.print(graph.strip())
+        Output.print("=" * n)
+
     @property
     def q(self):
         return Queue(self).qf
