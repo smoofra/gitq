@@ -7,8 +7,16 @@ import yaml
 
 from .output import Output
 from .git import Git, Commit, GitFailed, UserError, contextGit
-from .continuations import EditBranch, PickCherries, Step, Then, CheckoutBranch
-from .continuations import Loader as ContinuationsLoader, Dumper as ContinuationsDumper
+from .continuations import (
+    EditBranch,
+    PickCherries,
+    Step,
+    Then,
+    CheckoutBranch,
+    progn,
+    Loader as ContinuationsLoader,
+    Dumper as ContinuationsDumper,
+)
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -109,60 +117,14 @@ class Queue:
         else:
             self.git("commit", "-m", message)
 
-    def merge_baselines(self) -> Commit:
-
-        baseline, *baselines = self.qf.baselines
-        assert baseline.sha
-
-        self.git.checkout(baseline.sha, comment="merge_baselines")
-
-        if not baselines:
-            self.git("commit", "--allow-empty", "-m", message("baseline", self.qf.title))
-            self.save_queuefile(amend=True)
-            return self.git.commit("HEAD")
-
-        refs = [b.sha for b in baselines]
-
-        m = message("merged baselines", self.qf.title)
-
-        # try octopus merge first
-        try:
-            self.git("merge", "--no-ff", *refs, "-m", m)
-        except GitFailed:
-            if (self.git.gitdir / "MERGE_HEAD").exists():
-                if self.git.unmerged_files() == {self.queuefile_name}:
-                    self.save_queuefile(message=m)
-                    return self.git.commit("HEAD")
-                self.git("merge", "--abort")
-        else:
-            self.save_queuefile(amend=True)
-            return self.git.commit("HEAD")
-
-        # merge one at a time
-        for ref in refs:
-            try:
-                self.git("merge", "--no-ff", ref, "-m", m)
-            except GitFailed:
-                if not (self.git.gitdir / "MERGE_HEAD").exists():
-                    raise
-                if self.git.unmerged_files() == {self.queuefile_name}:
-                    self.save_queuefile(message=m)
-                    continue
-                self.git("merge", "--abort")
-                raise
-
-        self.save_queuefile(amend=True)
-        return self.git.commit("HEAD")
-
     def init(self):
         self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
         self.save_queuefile(amend=True)
 
     def init_new_branch(self, branch: str):
         self.git.detach()
-        self.merge_baselines()
-        self.git("branch", branch, "HEAD")
-        self.git.checkout(branch)
+        self.save_queuefile(message="new queue branch")
+        progn(MergeBaselines(self.qf.baselines), NewBranch(branch))
 
     def find_patches(self, ref: str, baselines: List[Baseline], new_base: str) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
@@ -267,10 +229,30 @@ class RebaseOne(Step):
         # FIXME these should not be re-refreshed every time this resumes
         q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
         with EditBranch(message="git-queue rebase") as branch:
-            q.merge_baselines()
-            patches = list(q.find_patches(branch, old_baselines, "HEAD"))
-            with PickCherries(cherries=[b.sha for b in patches], edit=True):
-                pass
+            progn(MergeBaselines(q.qf.baselines), FindAndPickCherries(branch, old_baselines))
+
+
+@dataclass
+class FindAndPickCherries(Step):
+    "Find patches in branch, and thn apply them to HEAD"
+
+    branch: str
+    old_baselines: List[Baseline]
+
+    def run(self) -> None:
+        q = Queue(self.git)
+        patches = list(q.find_patches(self.branch, self.old_baselines, "HEAD"))
+        with PickCherries(cherries=[b.sha for b in patches], edit=True):
+            pass
+
+
+@dataclass
+class NewBranch(Step):
+    name: str
+
+    def run(self) -> None:
+        self.git("branch", self.name, "HEAD")
+        self.git.checkout(self.name)
 
 
 @dataclass
@@ -296,6 +278,63 @@ class Rebase(Step):
 
         with Then(steps=steps):
             pass
+
+
+@dataclass
+class MergeBaselines(Step):
+
+    baselines: List[Baseline]
+
+    def run(self) -> None:
+        with Output.heading("merge baselines"):
+            self.merge_baselines()
+
+    def merge_baselines(self) -> None:
+        q = Queue(self.git)
+        q.qf.baselines = self.baselines
+
+        baseline, *baselines = self.baselines
+        assert baseline.sha
+
+        self.git.checkout(baseline.sha, comment="baseline" if not baselines else "first baseline")
+
+        if not baselines:
+            self.git("commit", "--allow-empty", "-m", message("baseline", q.qf.title))
+            q.save_queuefile(amend=True)
+            return
+
+        refs = [b.sha for b in baselines]
+
+        m = message("merged baselines", q.qf.title)
+
+        # try octopus merge first
+        try:
+            self.git("merge", "--no-ff", *refs, "-m", m)
+        except GitFailed:
+            if (self.git.gitdir / "MERGE_HEAD").exists():
+                if self.git.unmerged_files() == {q.queuefile_name}:
+                    q.save_queuefile(message=m)
+                    return
+                self.git("merge", "--abort")
+        else:
+            q.save_queuefile(amend=True)
+            return
+
+        # merge one at a time
+        for ref in refs:
+            try:
+                self.git("merge", "--no-ff", ref, "-m", m)
+            except GitFailed:
+                if not (self.git.gitdir / "MERGE_HEAD").exists():
+                    raise
+                if self.git.unmerged_files() == {q.queuefile_name}:
+                    q.save_queuefile(message=m)
+                    continue
+                self.git("merge", "--abort")
+                raise
+
+        q.save_queuefile(amend=True)
+        return
 
 
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:

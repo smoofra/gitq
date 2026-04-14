@@ -419,3 +419,8 @@ class Then(Continuation):
         yield
         while self.steps:
             self.steps.pop(0).run()
+
+
+def progn(*steps: Step):
+    with Then(steps=list(steps)):
+        pass
