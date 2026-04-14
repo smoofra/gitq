@@ -164,19 +164,17 @@ class Queue:
         self.git("branch", branch, "HEAD")
         self.git.checkout(branch)
 
-    def find_patches(
-        self, branch: str, baselines: List[Baseline], new_base: str
-    ) -> Iterator[Commit]:
+    def find_patches(self, ref: str, baselines: List[Baseline], new_base: str) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
             return
-        commits = self.git.commits(*(f"^{b.sha}" for b in baselines), branch, reverse=True)
+        commits = self.git.commits(*(f"^{b.sha}" for b in baselines), ref, reverse=True)
         base = self.find_git_cherry_limit(commits)
         # We use the + side instead of the - side of the `git cherry`
         # output to detect duplicates, because if we used the - side, then
         # it would only filter out distinct (different sha) commits that
         # are duplicated, but it does not filter out commits that are
         # literally present (same sha) in both branch and new_base.
-        new = set(r.sha for r in self.git.find_duplicates(base, branch, new_base) if r.is_new)
+        new = set(r.sha for r in self.git.find_duplicates(base, ref, new_base) if r.is_new)
         for commit in commits:
             if from_this_tool(commit):
                 continue
