@@ -7,7 +7,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 
 from .output import Output
-from .git import Git, UserError, GitFailed, contextGit
+from .git import Git, UserError, GitFailed, contextGit, Commit
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -353,7 +353,7 @@ class PickCherries(Continuation):
         yield
         while self.cherries:
             cherry, *self.cherries = self.cherries
-            cherry_pick(cherry, edit=self.edit)
+            cherry_pick(self.git.commit(cherry), edit=self.edit)
 
 
 @dataclass
@@ -379,15 +379,16 @@ class CherryPickContinue(Continuation):
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
-def cherry_pick(ref: str, *, edit: bool = False) -> None:
+def cherry_pick(cherry: Commit, *, edit: bool = False) -> None:
     "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
     git = contextGit.get()
+    abbrev = git.abbrev(cherry.sha)
     try:
-        git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", ref])
+        git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", abbrev], comment=cherry.title)
     except GitFailed:
         if edit and git.cherry_pick_in_progress:
-            with CherryPickContinue(ref=ref):
-                raise Suspend(status=f"cherry-picking {ref}")
+            with CherryPickContinue(ref=cherry.sha):
+                raise Suspend(status=f"cherry-picking {abbrev} {cherry.title}")
         else:
             git.cherry_pick_abort()
             raise

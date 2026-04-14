@@ -169,7 +169,7 @@ class KeepGoing(Continuation):
 
         except (SwapFailed, MergeFound, Stop):
             for cherry in self.cherries:
-                cherry_pick(cherry)
+                cherry_pick(self.git.commit(cherry))
             return
 
 
@@ -234,7 +234,7 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
         with CheckoutBaseline(three.sha if three else None):
             with PickCherryWithReference(cherry=two.sha, reference=one.sha):
                 try:
-                    cherry_pick(one.sha, edit=edit)
+                    cherry_pick(one, edit=edit)
                 except GitFailed as e:
                     raise SwapFailed(f"Swap failed: {e}") from e
                 except Suspend as e:
