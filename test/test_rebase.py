@@ -5,22 +5,19 @@ _ = repo
 
 
 def test_rebase(repo: Git):
-    repo.w("a", "a")
-    repo.s("git add a && git commit -m a")
+    repo.c("a")
     repo.s("git branch base HEAD")
     base0 = repo.rev_parse("HEAD")
 
-    repo.w("b", "b")
-    repo.s("git add b && git commit -m b")
-
+    repo.c("b")
     repo.s("git queue init base")
 
-    repo.s("git checkout base")
+    repo.s("git checkout -q base")
     repo.w("a", "A")
-    repo.s("git commit -a --amend -m A")
+    repo.s("git commit -qa --amend -m A")
     base1 = repo.rev_parse("HEAD")
 
-    repo.s("git checkout master")
+    repo.s("git checkout -q master")
     assert repo.log() == ["a", "b", "initialized queue"]
     assert [b.sha for b in repo.q.baselines] == [base0]
 
@@ -144,19 +141,15 @@ def test_rebase_edited_merge(repo: Git):
 
 @pytest.mark.parametrize("case", ["normal", "wrong_tool", "abort"])
 def test_rebase_conflict(repo: Git, case):
-    repo.w("a", "a")
-    repo.s("git add a && git commit -q -m a")
+    repo.c("a")
     repo.s("git branch base HEAD")
 
-    repo.w("b", "b")
-    repo.s("git add b && git commit -q -m b")
-
-    repo.w("c", "c")
-    repo.s("git add c && git commit -q -m c")
+    repo.c("b")
+    repo.c("c")
 
     repo.s("git queue init base")
 
-    repo.s("git checkout base")
+    repo.s("git checkout -q base")
     repo.w("a", "A")
     repo.w("b", "")
     repo.w("c", "")
@@ -164,7 +157,7 @@ def test_rebase_conflict(repo: Git, case):
     repo.s("git commit -a --amend -m A -q")
     base1 = repo.rev_parse("HEAD")
 
-    repo.s("git checkout master")
+    repo.s("git checkout -q master")
     sha = repo.rev_parse("HEAD")
 
     repo.s("git queue rebase; [[ $? = 2 ]]")
