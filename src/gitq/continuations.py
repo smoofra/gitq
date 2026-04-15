@@ -94,7 +94,10 @@ class Continuation(Generic[T], YAMLObject):
 
     def __enter__(self) -> T:
         self.manager = self.impl()
-        return self.manager.__enter__()
+        try:
+            return self.manager.__enter__()
+        except Suspend as exception:
+            raise Exception("continuations must not suspend before yield") from exception
 
     def __exit__(self, exception_type, exception, traceback) -> bool | None:
         if exception is None and exception_type is not None:
