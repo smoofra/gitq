@@ -1,7 +1,7 @@
 import os
 import subprocess
 import re
-from typing import List, Iterator, NamedTuple, Set, Iterable
+from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
 from pathlib import Path
 from contextvars import ContextVar
 
@@ -307,6 +307,15 @@ class Git:
                 return True
             raise
         return not self.cmd_test(["git", "diff", "--quiet", commit.sha, tree, "--"])
+
+    def merge_tree(self, a: str, b: str) -> Tuple[str, Set[str]]:
+        cmd = ["git", "merge-tree", "--name-only", "--no-messages", "-z", a, b]
+        p = subprocess.run(cmd, cwd=self.directory, capture_output=True, text=True)
+        if p.returncode not in [0, 1]:
+            raise GitFailed(f"git failed:\n{p.stderr}", rc=p.returncode)
+        tree, *conflicts = p.stdout.rstrip("\x00").split("\x00")
+        assert (p.returncode == 0) == (not conflicts)
+        return tree, set(conflicts)
 
     def checkout_tree(self, tree: str) -> None:
         "replace index and working files with the specified tree"

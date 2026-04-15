@@ -4,10 +4,6 @@
 
 This is currently a work in progress.  Planned features for `git-queue` include:
 
-* Baseline conflict resolution.   If baselines conflict a queue can contain
-  a merge commit to resolve the conflict.  Rebase should somehow be able to
-  deal with this in reasonable cases.
-
 *  Unapplied patches.  If rebase fails due to conflicts, give the user the
    choice to save commits as patch files to be applied later.
 

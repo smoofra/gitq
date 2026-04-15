@@ -468,3 +468,87 @@ def test_queuefile_conflict_3way(repo: Git):
         "merged baselines",
         "baz patch",
     ]
+
+
+@pytest.mark.parametrize("commit", [True, False])
+def test_merge_baseline_conflict(repo: Git, commit: bool):
+    "Test conflicting baselines and user-merges."
+    repo.c("0")
+
+    # Two branches each modifying a different file — no conflict initially
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Queue with both baselines — merges cleanly
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Update both baselines to conflict on the same file
+    repo.s("git checkout -q base_a")
+    repo.w("shared", "version a")
+    repo.s("git add shared && git commit -qm a2")
+
+    repo.s("git checkout -q base_b")
+    repo.w("shared", "version b")
+    repo.s("git add shared && git commit -qm b2")
+
+    # Rebase should suspend: merging the two updated baselines conflicts on "shared"
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+
+    # Resolve the conflict and continue
+    repo.w("shared", "merged")
+    repo.s("git add shared")
+    if commit:
+        repo.s("git commit -q --no-edit")
+    repo.s("git queue continue")
+
+    # Rebase works now!
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+    ]
+
+    # Rebase continues to work using the same user-merge commit
+    repo.c("patch2")
+    repo.s("git queue rebase")
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+        "patch2",
+    ]
+
+    # Rebase still works if you add more commits to the baselines
+    repo.s("git checkout -q base_a")
+    repo.c("a3")
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "a3",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+        "patch2",
+    ]

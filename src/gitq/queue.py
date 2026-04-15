@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Iterator
 from io import StringIO
 from pathlib import Path
+from contextlib import contextmanager
+from functools import cached_property
 
 import yaml
 
@@ -15,6 +17,8 @@ from .continuations import (
     CheckoutBranch,
     progn,
     Continuation,
+    Suspend,
+    Resume,
 )
 from .yaml import YAMLObject, BaseLoader
 
@@ -55,6 +59,7 @@ class QueueFile(YAMLObject):
 
 # These can appear in continuation files (e.g. as RebaseOne.onto), so register there too.
 Continuation.register(Baseline)
+Continuation.register(QueueFile)
 
 
 def message(m: str, title: str | None):
@@ -117,7 +122,7 @@ class Queue:
         if amend:
             self.git("commit", "--amend", "--allow-empty", "-C", "HEAD")
         elif commit_message:
-            self.git("commit", "-m", commit_message)
+            self.git("commit", "--allow-empty", "-m", commit_message)
 
     def init(self):
         self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
@@ -126,12 +131,33 @@ class Queue:
     def init_new_branch(self, branch: str):
         self.git.detach()
         self.save_queuefile(commit_message="new queue branch")
-        progn(MergeBaselines(self.qf.baselines), NewBranch(branch))
+        progn(MergeBaselines(self.qf), NewBranch(branch))
+
+    @staticmethod
+    def find_user_merges(commits: List[Commit]) -> Iterator[Commit]:
+        """
+        Find user merges as any merge commit below the "merged baseline" commits
+        Takes list of commits as output by:
+
+           git log --topo-order queue ^baseline...
+        """
+        # find user merges as any merge commit below the "merged baseline" commits
+        baseline_shas: set[str] = set()
+        for c in commits:
+            if is_merged_baseline(c):
+                baseline_shas.add(c.sha)
+            if c.sha in baseline_shas:
+                for p in c.parents:
+                    baseline_shas.add(p)
+        for c in commits:
+            if c.is_merge and c.sha in baseline_shas and not is_merged_baseline(c):
+                yield c
 
     def find_patches(self, ref: str, baselines: List[Baseline], new_base: str) -> Iterator[Commit]:
         if self.git.on_orphan_branch():
             return
         commits = self.git.commits(*(f"^{b.sha}" for b in baselines), ref, reverse=True)
+        user_merges = {c.sha for c in self.find_user_merges(list(reversed(commits)))}
         base = self.find_git_cherry_limit(commits)
         # We use the + side instead of the - side of the `git cherry`
         # output to detect duplicates, because if we used the - side, then
@@ -140,6 +166,8 @@ class Queue:
         # literally present (same sha) in both branch and new_base.
         new = set(r.sha for r in self.git.find_duplicates(base, ref, new_base) if r.is_new)
         for commit in commits:
+            if commit.sha in user_merges:
+                continue
             if from_this_tool(commit):
                 continue
             if commit.is_merge:
@@ -231,7 +259,7 @@ class RebaseOne(Step):
         # FIXME these should not be re-refreshed every time this resumes
         q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
         with EditBranch(message="git-queue rebase") as branch:
-            progn(MergeBaselines(q.qf.baselines), FindAndPickCherries(branch, old_baselines))
+            progn(MergeBaselines(q.qf), FindAndPickCherries(branch, old_baselines))
 
 
 @dataclass
@@ -283,35 +311,109 @@ class Rebase(Step):
 
 
 @dataclass
-class MergeBaselines(Step):
+class MergeContinue(Continuation):
+    """
+    When resuming, check if the user ran `git commit`, and do it for them
+    if they haven't.
+    """
 
-    baselines: List[Baseline]
+    @contextmanager
+    def impl(self) -> Iterator:
+        try:
+            yield
+        except (Exception, Resume):
+            self.git("merge", "--abort")
+            raise
+        if self.git.merge_in_progress:
+            if self.git.has_unmerged_files():
+                Output.print("The index still has unmerged files.")
+                raise Suspend(status="resolve conflicts and continue")
+            self.git("commit", "--no-edit")
+
+
+@dataclass
+class MergeBaselines(Step, Continuation):
+
+    qf: QueueFile
+    user_merges: List[str] = field(default_factory=list)
+    find_user_merges: bool = True
+    needs_checkout: bool = True
+    suspended_at: str | None = None
 
     def run(self) -> None:
+        with self:
+            pass
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        self.check_user_merges()
+        yield
+        if self.suspended_at:
+            # If continued after asking the user to make a merge, pick it
+            # up and add it to the list of user merges, and go back to the
+            # commit we were at before.
+            self.user_merges.append(self.git.rev_parse("HEAD"))
+            self.git.checkout(self.suspended_at)
+            self.suspended_at = None
         with Output.heading("merge baselines"):
             self.merge_baselines()
 
-    def merge_baselines(self) -> None:
-        q = Queue(self.git)
-        q.qf.baselines = self.baselines
+    @cached_property
+    def q(self):
+        return Queue(self.git, qf=self.qf)
 
-        baseline, *baselines = self.baselines
-        assert baseline.sha
+    def still_needed(self) -> Iterator[Baseline]:
+        "return a list of baselines that have not yet been merged"
+        for baseline in self.qf.baselines:
+            if not self.git.is_ancestor(baseline.sha):
+                yield baseline
 
-        self.git.checkout(baseline.sha, comment="baseline" if not baselines else "first baseline")
-
-        if not baselines:
-            self.git("commit", "--allow-empty", "-m", message("baseline", q.qf.title))
-            q.save_queuefile(amend=True)
+    def check_user_merges(self):
+        """
+        Find user merges in HEAD.   Ensure that all user merges are clean,
+        that is they do not introduce any new commits outside of the
+        baselines.
+        """
+        if not self.find_user_merges:
             return
+        self.find_user_merges = False
 
-        refs = [b.sha for b in baselines]
+        # Find user merges in HEAD
+        commits = self.git.commits("HEAD", *(f"^{b.sha}" for b in self.qf.baselines))
+        self.user_merges.extend(c.sha for c in Queue.find_user_merges(commits))
+
+        # Check that they're clean
+        clean = list()
+        for u in self.user_merges:
+            ancestors = self.git.commits(
+                u,
+                *(f"^{b.sha}" for b in self.qf.baselines),
+            )
+            if {a.sha for a in ancestors} <= {u for u in self.user_merges}:
+                clean.append(u)
+            else:
+                Output.print(f"user merge {u} is not clean, can't use it")
+        self.user_merges = clean
+
+    def merge_baselines(self) -> None:
+        q = self.q
+
+        # First, check out one of the baselines so there's something to
+        # merge into
+        if self.needs_checkout:
+            self.git.checkout(self.qf.baselines[0].sha, comment="baseline")
+            self.needs_checkout = False
+
+        needed = list(self.still_needed())
+        if not needed:
+            q.save_queuefile(commit_message=message("baseline", q.qf.title))
+            return
 
         m = message("merged baselines", q.qf.title)
 
         # try octopus merge first
         try:
-            self.git("merge", "--no-ff", *refs, "-m", m)
+            self.git("merge", "--no-ff", *(b.sha for b in needed), "-m", m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
@@ -323,9 +425,10 @@ class MergeBaselines(Step):
             return
 
         # merge one at a time
-        for ref in refs:
+        while needed:
+            baseline = needed.pop(0)
             try:
-                self.git("merge", "--no-ff", ref, "-m", m)
+                self.git("merge", "--no-ff", baseline.sha, "-m", m)
             except GitFailed:
                 if not (self.git.gitdir / "MERGE_HEAD").exists():
                     raise
@@ -333,10 +436,53 @@ class MergeBaselines(Step):
                     q.save_queuefile(commit_message=m)
                     continue
                 self.git("merge", "--abort")
-                raise
+            else:
+                q.save_queuefile(amend=True)
+                continue
+            # Oh, no!  A conflict!
+            return self.resolve_conflicts(baseline, *needed)
 
-        q.save_queuefile(amend=True)
-        return
+    def resolve_conflicts(self, *needed: Baseline) -> None:
+        assert needed
+
+        # try octopus merge with the user merges
+        b = message("merged baselines", self.qf.title)
+        try:
+            self.git("merge", "--no-ff", *self.user_merges, *(b.sha for b in needed), "-m", b)
+        except GitFailed:
+            if (self.git.gitdir / "MERGE_HEAD").exists():
+                if self.git.unmerged_files() == {Queue.queuefile_name}:
+                    self.q.save_queuefile(commit_message=b)
+                    return
+                self.git("merge", "--abort")
+        else:
+            self.q.save_queuefile(amend=True)
+            return
+
+        # find a conflict and ask the user to resolve it
+        needed_shas = {b.sha for b in needed}
+        merged = [b for b in self.qf.baselines if b.sha not in needed_shas]
+        for b in merged:
+            _, conflicts = self.git.merge_tree(needed[0].sha, b.sha)
+            if conflicts <= {Queue.queuefile_name}:
+                continue
+
+            self.suspended_at = self.git.rev_parse("HEAD")
+            self.git.checkout(b.sha, comment="baseline")
+            try:
+                self.git("merge", "-m", "resolved conflicts", needed[0].sha)
+                raise Exception("merge succeeded, but expected failure")
+            except GitFailed:
+                if not self.git.merge_in_progress:
+                    raise
+            if Queue.queuefile_name in self.git.unmerged_files():
+                self.git("rm", "-f", Queue.queuefile_name)
+
+            # suspend to allow the user to resolve the conflict
+            with MergeContinue():
+                raise Suspend(status="resolve conflicts and continue")
+
+        raise Exception("couldn't find a conflict in baselines")
 
 
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
