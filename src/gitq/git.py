@@ -145,8 +145,8 @@ class Git:
             raise GitFailed(f"git failed:\n{err}", rc=proc.wait())
         return out
 
-    def __call__(self, *args, quiet: bool = False) -> str:
-        return self.cmd(["git", *args], quiet=quiet)
+    def __call__(self, *args, quiet: bool = False, comment: str = "") -> str:
+        return self.cmd(["git", *args], quiet=quiet, comment=comment)
 
     def cmd_test(self, args, **kw) -> bool:
         proc = subprocess.Popen(
@@ -215,6 +215,10 @@ class Git:
     def cherry_pick_in_progress(self) -> bool:
         return (self.gitdir / "CHERRY_PICK_HEAD").exists()
 
+    @property
+    def merge_in_progress(self) -> bool:
+        return (self.gitdir / "MERGE_HEAD").exists()
+
     def unique_parent(self, commit: Commit) -> Commit:
         if len(commit.parents) != 1:
             raise MergeFound(f"{commit} is a merge")
@@ -238,8 +242,8 @@ class Git:
     def branch_exists(self, branch: str) -> bool:
         return self.ref_exists(f"refs/heads/{branch}")
 
-    def ls_files(self) -> Iterator[str]:
-        for line in self.cmd(["git", "ls-files"], quiet=True).splitlines():
+    def ls_files(self, *args) -> Iterator[str]:
+        for line in self.cmd(["git", "ls-files", *args], quiet=True).splitlines():
             yield line.rstrip()
 
     def on_orphan_branch(self) -> bool:
@@ -318,6 +322,10 @@ class Git:
             sign, sha = line.split(" ", 1)
             assert sign in "-+"
             yield DupRecord(sign == "+", sha)
+
+    def is_ancestor(self, ancestor: str, of: str = "HEAD") -> bool:
+        "Return True if ancestor is reachable from descendant"
+        return self.cmd_test(["git", "merge-base", "--is-ancestor", ancestor, of])
 
     def abbrev(self, ref: str) -> str:
         "Return abbreviated sha for ref"
