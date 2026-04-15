@@ -40,6 +40,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["test"]
 
+[tool.mypy]
+check_untyped_defs = true
+
 [tool.uv]
 check-url = "https://pypi.org/simple/"
 keyring-provider = "subprocess"
