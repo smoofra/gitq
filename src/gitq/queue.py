@@ -106,15 +106,18 @@ class Queue:
             with open(self.queuefile_path, "r") as f:
                 self.qf = yaml.load(f, Loader=Loader)
 
-    def save_queuefile(self, *, amend: bool = False, message: str = ""):
-        assert amend ^ bool(message)
+    def save_queuefile(
+        self, *, amend: bool = False, commit_message: str = "", stage: bool | None = None
+    ):
+        assert amend + (stage is not None) + bool(commit_message) == 1
         with open(self.queuefile_path, "w") as f:
             yaml.dump(self.qf, f, Dumper=Dumper)
-        self.git("add", self.queuefile_path.relative_to(self.git.directory))
+        if stage or amend or commit_message:
+            self.git("add", self.queuefile_path.relative_to(self.git.directory))
         if amend:
-            self.git("commit", "--amend", "-C", "HEAD")
-        else:
-            self.git("commit", "-m", message)
+            self.git("commit", "--amend", "--allow-empty", "-C", "HEAD")
+        elif commit_message:
+            self.git("commit", "-m", commit_message)
 
     def init(self):
         self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
@@ -122,7 +125,7 @@ class Queue:
 
     def init_new_branch(self, branch: str):
         self.git.detach()
-        self.save_queuefile(message="new queue branch")
+        self.save_queuefile(commit_message="new queue branch")
         progn(MergeBaselines(self.qf.baselines), NewBranch(branch))
 
     def find_patches(self, ref: str, baselines: List[Baseline], new_base: str) -> Iterator[Commit]:
@@ -312,7 +315,7 @@ class MergeBaselines(Step):
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
-                    q.save_queuefile(message=m)
+                    q.save_queuefile(commit_message=m)
                     return
                 self.git("merge", "--abort")
         else:
@@ -327,7 +330,7 @@ class MergeBaselines(Step):
                 if not (self.git.gitdir / "MERGE_HEAD").exists():
                     raise
                 if self.git.unmerged_files() == {q.queuefile_name}:
-                    q.save_queuefile(message=m)
+                    q.save_queuefile(commit_message=m)
                     continue
                 self.git("merge", "--abort")
                 raise
