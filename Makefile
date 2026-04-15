@@ -13,7 +13,7 @@ lint: flake8 black-check mypy
 	@ echo ✅
 
 flake8:
-	uv run flake8 --max-line-length $(MAX_LINE) $(SOURCES)
+	uv run flake8 --max-line-length $(MAX_LINE) --extend-ignore E203 $(SOURCES)
 
 black-check:
 	uv run black --check --line-length $(MAX_LINE) $(SOURCES)
