@@ -5,7 +5,6 @@ import shlex
 from contextlib import contextmanager
 from typing import ContextManager, List, Any
 from contextvars import ContextVar
-from pathlib import Path
 
 
 class Output:
@@ -38,7 +37,7 @@ class Output:
                 os.environ["GITQ_INDENT"] = str(n)
 
     @classmethod
-    def log_cmd(cls, cmd: List[str | Path] | str, comment: str = ""):
+    def log_cmd(cls, cmd: List | str, comment: str = ""):
         def quote(x):
             return shlex.quote(re.sub(r"\n.*", "...", str(x), flags=re.DOTALL))
 
