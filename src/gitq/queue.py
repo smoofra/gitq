@@ -14,8 +14,7 @@ from .continuations import (
     Then,
     CheckoutBranch,
     progn,
-    Loader as ContinuationsLoader,
-    Dumper as ContinuationsDumper,
+    Continuation,
 )
 from .yaml import YAMLObject, BaseLoader
 
@@ -42,10 +41,6 @@ class Baseline(YAMLObject):
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
 yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
 
-# Baseline can appear in continuation files (e.g. as RebaseOne.onto), so register it there too.
-ContinuationsLoader.add_constructor(Baseline.yaml_tag, Baseline.from_yaml)
-ContinuationsDumper.add_representer(Baseline, Baseline.to_yaml)
-
 
 @dataclass
 class QueueFile(YAMLObject):
@@ -56,6 +51,10 @@ class QueueFile(YAMLObject):
     title: str | None = field(default=None)
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
+
+
+# These can appear in continuation files (e.g. as RebaseOne.onto), so register there too.
+Continuation.register(Baseline)
 
 
 def message(m: str, title: str | None):

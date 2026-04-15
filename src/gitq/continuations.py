@@ -1,6 +1,6 @@
 import sys
 import yaml
-from typing import Optional, List, TypeVar, ContextManager, Generic, Iterator, NoReturn
+from typing import Optional, List, TypeVar, ContextManager, Generic, Iterator, NoReturn, Type
 from contextlib import contextmanager
 from itertools import count
 from abc import abstractmethod
@@ -120,6 +120,12 @@ class Continuation(Generic[T], YAMLObject):
     @property
     def git(sef) -> Git:
         return contextGit.get()
+
+    @staticmethod
+    def register(c: Type[YAMLObject]) -> None:
+        "register a class for yaml serialization in continuations"
+        Loader.add_constructor(c.yaml_tag, c.from_yaml)
+        Dumper.add_representer(c, c.to_yaml)
 
 
 class Main:
