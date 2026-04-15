@@ -552,3 +552,172 @@ def test_merge_baseline_conflict(repo: Git, commit: bool):
         "patch",
         "patch2",
     ]
+
+
+def test_merge_baseline_conflict_3way(repo: Git):
+    repo.c("0")
+
+    # Two branches with non-conflicting content initially
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Queue initializes cleanly (no shared-file conflict yet)
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Update both baselines to conflict on "shared"
+    repo.s("git checkout -q base_a")
+    repo.w("shared", "version a\n")
+    repo.s("git add shared && git commit -qm a2")
+
+    repo.s("git checkout -q base_b")
+    repo.w("shared", "version b\n")
+    repo.s("git add shared && git commit -qm b2")
+
+    # First rebase suspends: A and B now conflict on "shared"
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+
+    # User resolves A vs B
+    repo.s("{ git show :2:shared; git show :3:shared; } > shared && git add shared")
+    repo.s("git queue continue")
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+    ]
+
+    # Create a third baseline C that also conflicts on "shared"
+    repo.s("git checkout -qb base_c master")
+    repo.w("shared", "version c")
+    repo.s("git add shared && git commit -qm c")
+
+    # Adding C: resolve conflict with previous resolution
+    repo.s("git checkout -q q")
+    repo.s("git queue add base_c; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+    repo.s("{ git show :2:shared; git show :3:shared; } > shared && git add shared")
+    repo.s("git queue continue")
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "merged baselines",
+        "c",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+    ]
+
+    # Check that shared has the expected contents
+    with open(repo.directory / "shared", "r") as f:
+        assert {x.strip() for x in f.read().splitlines()} == {
+            "version a",
+            "version b",
+            "version c",
+        }
+
+    # add another commit to a, no more conflict resolution should be needed
+    repo.s("git checkout -q base_a")
+    repo.c("a3")
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert repo.log() == [
+        "0",
+        "a",
+        "a2",
+        "a3",
+        "b",
+        "b2",
+        "resolved conflicts",
+        "c",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+    ]
+
+
+def test_merge_baseline_conflict_2x1(repo: Git):
+    repo.c("0")
+
+    # Two branches with non-conflicting content initially
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Queue initializes cleanly (no shared-file conflict yet)
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Create a third baseline C that conflicts with both A and B
+    repo.s("git checkout -qb base_c master")
+    repo.w("a", "c")
+    repo.w("b", "c")
+    repo.s("git add a b && git commit -qm c")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue add base_c; [[ $? = 2 ]]")
+
+    # resolve conflicts between B and C
+    assert repo.unmerged() == {"b"}
+    repo.s("{ git show :2:b; git show :3:b; } >b && git add -u")
+    repo.s("git queue continue; [[ $? = 2 ]]")
+
+    # resolve conflicts between A and C
+    assert repo.unmerged() == {"a"}
+    repo.s("{ git show :2:a; git show :3:a; } >a && git add -u")
+    repo.s("git queue continue")
+
+    assert repo.log() == [
+        "0",
+        "a",
+        "b",
+        "merged baselines",
+        "c",
+        "resolved conflicts",
+        "resolved conflicts",
+        "merged baselines",
+        "patch",
+    ]
+
+    with open(repo.directory / "a", "r") as f:
+        assert {x.strip() for x in f.read().splitlines()} == {"a", "c"}
+
+    with open(repo.directory / "b", "r") as f:
+        assert {x.strip() for x in f.read().splitlines()} == {"b", "c"}
+
+    # add something to a baseline and check that rebase succeeds
+    repo.s("git checkout -q base_c")
+    repo.c("C")
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+
+    assert repo.log() == [
+        "0",
+        "a",
+        "b",
+        "merged baselines",
+        "c",
+        "resolved conflicts",
+        "resolved conflicts",
+        "merged baselines",
+        "C",
+        "merged baselines",
+        "patch",
+    ]
