@@ -296,6 +296,10 @@ class Git:
         self.fetched.add(remote)
 
     def is_conflicted(self, commit: Commit) -> bool:
+        if len(commit.parents) < 2:
+            return False
+        if len(commit.parents) > 2:
+            raise NotImplementedError  # FIXME merge-tree can only take two arguments!
         try:
             tree = self("merge-tree", "--name-only", *commit.parents, quiet=True).strip()
         except GitFailed as e:
