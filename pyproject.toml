@@ -34,11 +34,20 @@ dev = [
     "flake8>=7.3.0,<8.0.0",
     "pytest>=8.4.2,<9.0.0",
     "pytest-xdist>=3.8.0",
-    "types-pyyaml>=6.0.12.20250915,<7.0.0.0"
+    "types-pyyaml>=6.0.12.20250915,<7.0.0.0",
+    "coverage>=7.13.5",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+
+[tool.coverage.run]
+source = ["gitq"]
+parallel = true
+branch = true
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.mypy]
 check_untyped_defs = true

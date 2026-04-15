@@ -4,7 +4,7 @@ SOURCES = src test
 
 export GIT_QUEUE_TEMP_REPO=
 
-.PHONY: check flake8 black black-check mypy test format lint
+.PHONY: check flake8 black black-check mypy test coverage format lint
 
 check: flake8 black-check mypy test
 	@ echo ✅
@@ -26,5 +26,11 @@ mypy:
 
 test:
 	uv run pytest -n auto
+
+coverage:
+	COVERAGE_PROCESS_START=$(PWD)/pyproject.toml COVERAGE_FILE=$(PWD)/.coverage uv run pytest -n auto
+	uv run coverage combine
+	uv run coverage html
+	open htmlcov/index.html
 
 format: flake8 black
