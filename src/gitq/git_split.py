@@ -40,15 +40,14 @@ class SuspendForAmend(Continuation):
             self.done = True
             raise Suspend(
                 status=f"Commit {self.target} was split.\n"
-                + "Edit the message with: git commit --amend\n"
-                + "Then resume with: git split --continue."
+                + "Edit the message with `git commit --amend`"
             )
 
 
 class Main(continuations.Main):
 
     tool = "git-split"
-    suspend_message = "Resume with `git split --continue` when done."
+    continue_command = "git split --continue"
 
     def main(self):
         parser = argparse.ArgumentParser(
@@ -90,7 +89,7 @@ class Main(continuations.Main):
             status = (
                 f"Splitting {target}.\n"
                 + "Changes from the commit are now staged.\n"
-                + "Make one or more commits here, then resume with: git split --continue."
+                + "Make one or more commits here."
             )
 
             with EditBranch(message="git-split"):

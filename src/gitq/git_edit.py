@@ -18,7 +18,7 @@ COMMIT back on top.
 class Main(continuations.Main):
 
     tool = "git-edit"
-    suspend_message = "Suspended! edit HEAD, then resume with `git edit --continue`"
+    continue_command = "git edit --continue"
 
     def main(self):
         parser = argparse.ArgumentParser(
@@ -58,7 +58,7 @@ class Main(continuations.Main):
             commit = self.git.commit(args.commit)
             with EditBranch(message="git-edit"):
                 with edit_commit(commit, git=self.git, edit=True):
-                    raise Suspend
+                    raise Suspend(status="Edit HEAD")
 
 
 main = Main()

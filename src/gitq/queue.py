@@ -8,7 +8,7 @@ from functools import cached_property
 import yaml
 
 from .output import Output
-from .git import Git, Commit, GitFailed, UserError, contextGit
+from .git import Git, Commit, GitFailed, UserError, contextGit, Sha
 from .continuations import (
     EditBranch,
     PickCherries,
@@ -19,6 +19,7 @@ from .continuations import (
     Continuation,
     Suspend,
     Resume,
+    Heading,
 )
 from .yaml import YAMLObject, BaseLoader
 
@@ -40,6 +41,38 @@ class Baseline(YAMLObject):
     sha: str
     ref: str | None = field(default=None)
     remote: str | None = field(default=None)
+
+    def _summary(self) -> tuple[str, str]:
+        git = contextGit.get()
+        commit = git.commit(self.sha)
+        if not self.remote:
+            if not self.ref:
+                return commit.abbrev, commit.title
+            ref = git.abbrev_symbolic(self.ref)
+            return commit.abbrev, f"({ref}) {commit.title}"
+
+        remote = self.remote
+        if remote_name := git.find_remote(self.remote):
+            remote = remote_name
+
+        assert self.ref
+        if remote_name and self.ref.startswith("refs/heads/"):
+            branch = self.ref.removeprefix("refs/heads/")
+            ref = f"refs/remotes/{remote_name}/{branch}"
+            if git.rev_parse(ref) == self.sha:
+                ref = git.abbrev_symbolic(ref)
+                return commit.abbrev, f"({ref}) {commit.title}"
+
+        return commit.abbrev, f"({self.ref} @ {remote}) {commit.title}"
+
+    @property
+    def summary(self):
+        abbrev, title = self._summary()
+        return f"{abbrev} {title}"
+
+    @property
+    def title(self):
+        return self._summary()[1]
 
 
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
@@ -209,7 +242,7 @@ class Queue:
         return bases[0]
 
     def rebase(self, onto: List[Baseline] | None = None) -> None:
-        with Output.heading("rebasing"):
+        with Heading("Rebasing queue"):
             Rebase(onto).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
@@ -317,17 +350,28 @@ class MergeContinue(Continuation):
     if they haven't.
     """
 
+    head: str
+    to_merge: str
+
+    @property
+    def status(self) -> str:
+        return (
+            f"Merging {self.git.commit(self.head).summary}\n"
+            + f"   with {self.git.commit(self.to_merge).summary}\n"
+            + "Resolve the conflicts."
+        )
+
     @contextmanager
-    def impl(self) -> Iterator:
+    def impl(self) -> Iterator[MergeContinue]:
         try:
-            yield
+            yield self
         except (Exception, Resume):
             self.git("merge", "--abort")
             raise
         if self.git.merge_in_progress:
             if self.git.has_unmerged_files():
                 Output.print("The index still has unmerged files.")
-                raise Suspend(status="resolve conflicts and continue")
+                raise Suspend(status=self.status)
             self.git("commit", "--no-edit")
 
 
@@ -346,16 +390,16 @@ class MergeBaselines(Step, Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
-        self.check_user_merges()
         yield
-        if self.suspended_at:
-            # If continued after asking the user to make a merge, pick it
-            # up and add it to the list of user merges, and go back to the
-            # commit we were at before.
-            self.user_merges.append(self.git.rev_parse("HEAD"))
-            self.git.checkout(self.suspended_at)
-            self.suspended_at = None
-        with Output.heading("merge baselines"):
+        with Heading("Merging baselines"):
+            self.check_user_merges()
+            if self.suspended_at:
+                # If continued after asking the user to make a merge, pick it
+                # up and add it to the list of user merges, and go back to the
+                # commit we were at before.
+                self.user_merges.append(self.git.rev_parse("HEAD"))
+                self.git.checkout(Sha(self.suspended_at))
+                self.suspended_at = None
             self.merge_baselines()
 
     @cached_property
@@ -413,7 +457,8 @@ class MergeBaselines(Step, Continuation):
         # First, check out one of the baselines so there's something to
         # merge into
         if self.needs_checkout:
-            self.git.checkout(self.qf.baselines[0].sha, comment="baseline")
+            b0 = self.qf.baselines[0]
+            self.git.checkout(Sha(b0.sha), comment=b0.title)
             self.needs_checkout = False
 
         needed = list(self.still_needed())
@@ -423,7 +468,7 @@ class MergeBaselines(Step, Continuation):
 
         # try octopus merge first
         try:
-            self.git("merge", "--no-ff", *(b.sha for b in needed), "-m", self.m)
+            self.git("merge", "--no-ff", *(Sha(b.sha) for b in needed), "-m", self.m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
@@ -436,7 +481,8 @@ class MergeBaselines(Step, Continuation):
 
         # try octopus with user merges
         try:
-            self.git("merge", "--no-ff", *(b.sha for b in needed), *self.user_merges, "-m", self.m)
+            shas = [*(b.sha for b in needed), *self.user_merges]
+            self.git("merge", "--no-ff", *(Sha(s) for s in shas), "-m", self.m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
@@ -450,21 +496,24 @@ class MergeBaselines(Step, Continuation):
         # merge one at a time
         while needed:
             baseline = needed.pop(0)
-            try:
-                self.git("merge", "--no-ff", baseline.sha, "-m", self.m)
-            except GitFailed:
-                if not self.git.merge_in_progress:
-                    raise
-                if self.git.unmerged_files() == {q.queuefile_name}:
-                    q.save_queuefile(commit_message=self.m)
+            with Heading(f"Merging {baseline.summary}"):
+                try:
+                    self.git(
+                        "merge", "--no-ff", Sha(baseline.sha), "-m", self.m, comment=baseline.title
+                    )
+                except GitFailed:
+                    if not self.git.merge_in_progress:
+                        raise
+                    if self.git.unmerged_files() == {q.queuefile_name}:
+                        q.save_queuefile(commit_message=self.m)
+                        continue
+                    self.git("merge", "--abort")
+                else:
+                    q.save_queuefile(amend=True)
                     continue
-                self.git("merge", "--abort")
-            else:
-                q.save_queuefile(amend=True)
-                continue
-            # Oh, no!  A conflict!
-            self.resolve_conflicts(baseline)
-            needed = list(self.still_needed())
+                # Oh, no!  A conflict!
+                self.resolve_conflicts(baseline)
+                needed = list(self.still_needed())
 
     def would_conflict(self, a: str, b: str) -> bool:
         _, conflicts = self.git.merge_tree(a, b)
@@ -479,11 +528,13 @@ class MergeBaselines(Step, Continuation):
         for u in self.user_merges:
             contains_baseline = self.git.is_ancestor(baseline.sha, of=u)
             if self.git.rev_parse("HEAD") != head:
-                self.git.checkout(head)
+                self.git.checkout(Sha(head))
 
             # try to merge u
             try:
-                self.git("merge", "--no-ff", u, "-m", self.m)
+                self.git(
+                    "merge", "--no-ff", Sha(u), "-m", self.m, comment=self.git.commit(u).title
+                )
             except GitFailed:
                 if not self.git.merge_in_progress:
                     raise
@@ -506,7 +557,9 @@ class MergeBaselines(Step, Continuation):
 
             # See if baseline will merge now
             try:
-                self.git("merge", "--no-ff", baseline.sha, "-m", self.m)
+                self.git(
+                    "merge", "--no-ff", Sha(baseline.sha), "-m", self.m, comment=baseline.title
+                )
             except GitFailed:
                 if not self.git.merge_in_progress:
                     raise
@@ -528,9 +581,9 @@ class MergeBaselines(Step, Continuation):
             raise Exception
 
         self.suspended_at = head
-        self.git.checkout(commit.sha, comment="baseline")
+        self.git.checkout(Sha(commit.sha), comment=commit.title)
         try:
-            self.git("merge", "-m", "resolved conflicts", to_merge)
+            self.git("merge", "-m", "resolved conflicts", Sha(to_merge))
             raise Exception("merge succeeded, but expected failure")
         except GitFailed:
             if not self.git.merge_in_progress:
@@ -539,8 +592,8 @@ class MergeBaselines(Step, Continuation):
             self.git("rm", "-f", Queue.queuefile_name)
 
         # suspend to allow the user to resolve the conflict
-        with MergeContinue():
-            raise Suspend(status="resolve conflicts and continue")
+        with MergeContinue(head, to_merge) as m:
+            raise Suspend(status=m.status)
 
 
 def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:

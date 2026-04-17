@@ -66,6 +66,10 @@ def coalesce(lines: Iterable[str]) -> Iterator[str]:
         yield cur
 
 
+class Sha(str):
+    pass
+
+
 class Commit(object):
 
     parents: List[str]
@@ -131,11 +135,17 @@ class Git:
         self.directory = Path(top)
         self.gitdir = self.directory / self("rev-parse", "--git-dir", quiet=True).strip()
 
+    def abbrev_if_sha(self, x) -> str:
+        if isinstance(x, Sha):
+            return self.abbrev(x)
+        else:
+            return str(x)
+
     def cmd(
         self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = "", **kw
     ) -> str:
         if not quiet:
-            Output.log_cmd(cmd, comment=comment)
+            Output.log_cmd(list(map(self.abbrev_if_sha, cmd)), comment=comment)
         if interactive:
             kw["stderr"] = subprocess.PIPE
         else:
@@ -169,7 +179,7 @@ class Git:
         return name or None
 
     def detach(self) -> None:
-        self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL, comment="detach")
+        self.cmd(["git", "checkout", Sha(self.rev_parse("HEAD"))], stderr=FNULL, comment="detach")
 
     def upstream(self, branch: str) -> str | None:
         "return the sha of the branch's upstream, or None"
@@ -349,3 +359,10 @@ class Git:
     def abbrev(self, ref: str) -> str:
         "Return abbreviated sha for ref"
         return self.cmd(["git", "rev-parse", "--short", ref], quiet=True).strip()
+
+    def abbrev_symbolic(self, ref: str) -> str:
+        "Return an abbreviated ref name for ref"
+        cmd = ["git", "rev-parse", "--symbolic", "--abbrev-ref", ref]
+        if abbrev := self.cmd(cmd, quiet=True).strip():
+            return abbrev
+        return ref

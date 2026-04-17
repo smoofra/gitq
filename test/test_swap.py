@@ -69,6 +69,7 @@ def test_resume(repo: Git):
     assert repo.log() == ["0", "a", "b"]
     sha = repo.rev_parse("HEAD")
     repo.s("git swap --edit; [[ $? = 2 ]]")
+    repo.s("git swap --status")
     repo.w("a", "bbb")
     repo.s("git add -u")
     repo.s("git swap --continue")

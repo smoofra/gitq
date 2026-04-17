@@ -50,6 +50,8 @@ class Output:
 
     @classmethod
     def print(cls, *args: Any) -> None:
+        if not args:
+            print()
         for line in " ".join(map(str, args)).splitlines():
             print(" " * cls.indentation.get() + line)
 

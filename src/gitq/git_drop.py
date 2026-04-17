@@ -17,7 +17,7 @@ Delete a commit from history, replaying all commits above it.
 class Main(continuations.Main):
 
     tool = "git-drop"
-    suspend_message = "Suspended! Resolve conflicts and resume with `git drop --continue`"
+    continue_command = "git drop --continue"
 
     def main(self):
         parser = argparse.ArgumentParser(description=description)

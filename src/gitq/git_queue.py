@@ -45,7 +45,7 @@ can resolve them, then resume with `git queue continue`.
 class Main(continuations.Main):
 
     tool = "git-queue"
-    suspend_message = "Suspended! Resolve conflicts and resume with `git queue continue`"
+    continue_command = "git queue continue"
 
     def main(self) -> None:
         parser = argparse.ArgumentParser(

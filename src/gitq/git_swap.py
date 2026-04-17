@@ -5,7 +5,6 @@ import sys
 from contextlib import contextmanager
 from typing import List, Optional, Iterator, TypeVar, NoReturn
 import argparse
-from textwrap import dedent
 from dataclasses import dataclass, field
 
 from .continuations import (
@@ -16,11 +15,11 @@ from .continuations import (
     EditBranch,
     PickCherries,
     Resume,
-    Suspend,
+    Heading,
 )
 from . import continuations
 from .output import Output
-from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit
+from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit, Sha
 from .queue import Queue, NotAQueue
 
 description = """Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history),
@@ -164,7 +163,7 @@ class KeepGoing(Continuation):
                 A = self.git.commit("HEAD")
                 B = self.git.unique_parent(A)
                 self.cherries = [A.sha] + self.cherries
-                self.git.checkout(B.sha)
+                self.git.checkout(Sha(B.sha))
                 swap_or_squash(edit=self.edit, git=self.git, baselines=self.baselines, stop=True)
 
         except (SwapFailed, MergeFound, Stop):
@@ -215,7 +214,7 @@ def edit_commit(commit: Optional[Commit], *, git: Git, edit: bool = False):
         yield
         return
     cherries = collect_cherries(commit, git=git)
-    git.checkout(commit.sha)
+    git.checkout(Sha(commit.sha))
     with PickCherries(cherries=cherries, edit=edit):
         yield
 
@@ -230,22 +229,16 @@ def swap(*, git: Git, edit: bool = False, baselines: List[str]) -> None:
         raise SwapFailed(f"Swap failed: {e}") from e
     if two.sha in baselines:
         raise SwapFailed("hit baseline")
-    with SwapCheckpoint(head=one.sha):
-        with CheckoutBaseline(three.sha if three else None):
-            with PickCherryWithReference(cherry=two.sha, reference=one.sha):
-                try:
-                    cherry_pick(one, edit=edit)
-                except GitFailed as e:
-                    raise SwapFailed(f"Swap failed: {e}") from e
-                except Suspend as e:
-                    e.status = dedent(
-                        f"""
-                    Attempting to swap:
-                        {one.summary}
-                        {two.summary}
-                    """
-                    )
-                    raise
+
+    heading = f"Attempting to swap:\n\t{one.summary}\n\t{two.summary}"
+    with Heading(heading, quiet=True):
+        with SwapCheckpoint(head=one.sha):
+            with CheckoutBaseline(three.sha if three else None):
+                with PickCherryWithReference(cherry=two.sha, reference=one.sha):
+                    try:
+                        cherry_pick(one, edit=edit)
+                    except GitFailed as e:
+                        raise SwapFailed(f"Swap failed: {e}") from e
 
 
 def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str], stop: bool) -> None:
@@ -258,7 +251,7 @@ def swap_or_squash(*, edit: bool = False, git: Git, baselines: List[str], stop: 
 class Main(continuations.Main):
 
     tool = "git-swap"
-    suspend_message = "Suspended! Resolve conflicts and resume with `git swap --continue`"
+    continue_command = "git swap --continue"
 
     def __call__(self) -> NoReturn:
         try:
@@ -368,7 +361,7 @@ class Main(continuations.Main):
             raise UserError("commit is already at HEAD")
         if args.keep_going:
             with KeepGoingUp(edit=args.edit, cherries=cherries):
-                self.git.checkout(commit.sha)
+                self.git.checkout(Sha(commit.sha))
         else:
             with edit_commit(self.git.commit(cherries[0]), git=self.git):
                 swap_or_squash(edit=args.edit, git=self.git, baselines=[], stop=False)

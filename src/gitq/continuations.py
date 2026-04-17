@@ -7,7 +7,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 
 from .output import Output
-from .git import Git, UserError, GitFailed, contextGit, Commit
+from .git import Git, UserError, GitFailed, contextGit, Commit, Sha
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -29,8 +29,10 @@ class Continuations(YAMLObject):
 
     yaml_loader = Loader
     yaml_dumper = Dumper
+
     continuations: List[Continuation]
     tool: str
+    continue_command: str | None = None
     status: str | None = field(default=None)
 
 
@@ -105,6 +107,7 @@ class Continuation(Generic[T], YAMLObject):
 
         if isinstance(exception, Suspend):
             exception.continuations.append(self)
+            self.manager.__exit__(exception_type, exception, traceback)
             return None
 
         try:
@@ -131,7 +134,7 @@ class Continuation(Generic[T], YAMLObject):
 class Main:
 
     tool: str
-    suspend_message = "Suspended!"
+    continue_command: str
 
     @abstractmethod
     def main(self) -> None:
@@ -165,13 +168,16 @@ class Main:
             raise Exception("Internal error.  Uncaught Resume") from e
 
     def suspend(self, e: Suspend) -> NoReturn:
-        if e.status:
-            Output.print(e.status)
         with open(self.git.continuation, "w") as f:
             continuations = list(reversed(e.continuations))
-            j = Continuations(continuations, self.tool, e.status)
+            j = Continuations(continuations, self.tool, self.continue_command, e.status)
             yaml.dump(j, f, Dumper=Dumper)
-        Output.print(self.suspend_message)
+        Output.print()
+        Output.print("Suspended!")
+        if e.status:
+            Output.print(e.status)
+        if j.continue_command:
+            Output.print(f"Then continue with `{j.continue_command}`")
         sys.exit(2)
 
     def reanimate(self, continuations: List[Continuation], *, throw: BaseException | None) -> None:
@@ -214,9 +220,16 @@ class Main:
             return
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
-        if j.tool != self.tool:
-            Output.print(f"{j.tool} operation is in progress.")
-        Output.print(j.status or f"{j.tool} operation is in progress")
+
+        Output.print(f"A {j.tool} operation is in progress.")
+        Output.print()
+        for c in j.continuations:
+            if isinstance(c, Heading):
+                Output.print(f" * {c.message}")
+        Output.print()
+        Output.print(j.status)
+        if j.continue_command:
+            Output.print(f"Then continue with `{j.continue_command}`")
 
 
 class Finally(Continuation):
@@ -234,6 +247,8 @@ class Finally(Continuation):
             raise
         except (Exception, Resume):
             self.cleanup()
+            raise
+        except Suspend:
             raise
         except BaseException as e:
             self.cleanup()
@@ -289,7 +304,7 @@ def CheckoutBaseline(sha: str | None):
         with TempBranch():
             yield
     else:
-        git.checkout(sha)
+        git.checkout(Sha(sha))
         yield
 
 
@@ -384,23 +399,26 @@ class CherryPickContinue(Continuation):
         if self.git.cherry_pick_in_progress:
             if self.git.has_unmerged_files():
                 Output.print("The index still has unmerged files.")
-                raise Suspend(status=f"cherry-picking {self.ref}")
+                raise Suspend(status="Resolve the conflicts.")
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
 def cherry_pick(cherry: Commit, *, edit: bool = False) -> None:
     "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
     git = contextGit.get()
-    abbrev = git.abbrev(cherry.sha)
-    try:
-        git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", abbrev], comment=cherry.title)
-    except GitFailed:
-        if edit and git.cherry_pick_in_progress:
-            with CherryPickContinue(ref=cherry.sha):
-                raise Suspend(status=f"cherry-picking {abbrev} {cherry.title}")
-        else:
-            git.cherry_pick_abort()
-            raise
+    with Heading(f"Cherry picking {cherry.summary}", quiet=True):
+        try:
+            git.cmd(
+                ["git", "cherry-pick", "--quiet", "--allow-empty", Sha(cherry.sha)],
+                comment=cherry.title,
+            )
+        except GitFailed:
+            if edit and git.cherry_pick_in_progress:
+                with CherryPickContinue(ref=cherry.sha):
+                    raise Suspend(status="Resolve the conflicts.")
+            else:
+                git.cherry_pick_abort()
+                raise
 
 
 class Step(YAMLObject):
@@ -433,3 +451,18 @@ class Then(Continuation):
 def progn(*steps: Step):
     with Then(steps=list(steps)):
         pass
+
+
+@dataclass
+class Heading(Continuation):
+
+    message: str
+    quiet: bool | None = None
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        if self.quiet:
+            yield
+        else:
+            with Output.heading(self.message):
+                yield
