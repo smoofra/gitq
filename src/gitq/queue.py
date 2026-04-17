@@ -516,13 +516,10 @@ class MergeBaselines(Step, Continuation):
                 self.q.save_queuefile(amend=True)
                 return
 
-        if self.git.rev_parse("HEAD") != head:
-            self.git.checkout(head)
-
         # to_merge conflicts with HEAD.  Find an appropriate (not a "merged
         # baselines") commit in HEAD which it conflicts with, and ask the
         # user to resolve the conflict.
-        for commit in self.git.commits("HEAD", *(f"^{b.sha}^@" for b in self.qf.baselines)):
+        for commit in self.git.commits(head, *(f"^{b.sha}^@" for b in self.qf.baselines)):
             if is_merged_baseline(commit):
                 continue
             if self.would_conflict(to_merge, commit.sha):
