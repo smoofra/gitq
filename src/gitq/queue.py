@@ -362,7 +362,7 @@ class MergeContinue(Continuation):
         )
 
     @contextmanager
-    def impl(self) -> Iterator[MergeContinue]:
+    def impl(self) -> Iterator["MergeContinue"]:
         try:
             yield self
         except (Exception, Resume):

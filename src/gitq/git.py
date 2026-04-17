@@ -10,7 +10,7 @@ from .output import Output
 
 FNULL = open(os.devnull, "w")
 
-contextGit: ContextVar[Git] = ContextVar("git")
+contextGit: ContextVar["Git"] = ContextVar("git")
 
 
 class GitFailed(Exception):
@@ -44,7 +44,7 @@ class DupRecord(NamedTuple):
     "a record output by `git cherry`"
 
     is_new: bool
-    sha: Sha
+    sha: "Sha"
 
     @property
     def is_duplicate(self):
@@ -67,7 +67,7 @@ def coalesce(lines: Iterable[str]) -> Iterator[str]:
 
 
 class Sha(str):
-    def __new__(cls, value: str) -> Sha:
+    def __new__(cls, value: str) -> "Sha":
         assert re.match(r"^[0-9a-f]+$", value, flags=re.IGNORECASE)
         return super().__new__(cls, value)
 

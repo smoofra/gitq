@@ -30,7 +30,7 @@ class Continuations(YAMLObject):
     yaml_loader = Loader
     yaml_dumper = Dumper
 
-    continuations: List[Continuation]
+    continuations: List["Continuation"]
     tool: str
     continue_command: str | None = None
     status: str | None = field(default=None)
