@@ -6,6 +6,10 @@ import yaml
 from gitq.git import Sha
 from gitq.queue import QueueFile, Loader, Dumper
 
+from .fixtures import Git, repo
+
+_ = repo
+
 
 def test_yaml() -> None:
 
@@ -46,3 +50,34 @@ def test_yaml() -> None:
         pass
     else:
         raise Exception("parse should have failed")
+
+
+def test_tidy(repo: Git):
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.c("patch1")
+
+    base_sha = repo.rev_parse("refs/heads/base")
+
+    # Overwrite the queuefile with valid but non-normalized YAML
+    # After tidy the content should be re-serialized using the custom Dumper.
+    queuefile = repo / ".git-queue"
+    with open(queuefile, "w") as f:
+        f.write(f"baselines:\n- ref: refs/heads/base\n  sha: {base_sha}\n")
+
+    with open(queuefile) as f:
+        repr0 = f.read()
+        f.seek(0)
+        qf0: QueueFile = yaml.load(f, Loader=Loader)
+
+    repo.s("git queue tidy")
+
+    with open(queuefile) as f:
+        repr1 = f.read()
+        f.seek(0)
+        qf1: QueueFile = yaml.load(f, Loader=Loader)
+
+    assert repr0 != repr1
+    assert qf0 == qf1

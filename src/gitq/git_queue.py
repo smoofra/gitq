@@ -4,7 +4,7 @@ import argparse
 import yaml
 
 from .git import Git
-from .queue import QueueFile, Baseline, Queue, Loader as QueueLoader
+from .queue import QueueFile, Baseline, Queue, Loader, Dumper
 from .continuations import Abort, UserError
 from . import continuations
 
@@ -124,9 +124,10 @@ class Main(continuations.Main):
         if args.command == "tidy":
             if queuefile.exists():
                 with open(queuefile, "r") as f:
-                    q = yaml.load(f, Loader=QueueLoader)
+                    q = yaml.load(f, Loader=Loader)
                 with open(queuefile, "w") as f:
-                    q.dump(f)
+                    yaml.dump(q, f, Dumper=Dumper)
+            return
 
         with self.setup():
 
