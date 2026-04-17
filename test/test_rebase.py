@@ -1,5 +1,7 @@
 import pytest
 from .fixtures import Git, repo
+from gitq.git import contextGit, GitFailed, Sha
+from gitq.queue import Queue
 
 _ = repo
 
@@ -371,6 +373,45 @@ def test_recursive_rebase_deep(repo: Git):
         "baseline",
         "baz1",
     ]
+
+
+def test_needs_rebase_circular_dependency():
+    "Test an unrealistic scenario where two queues purport to be based on each other"
+
+    sha_a = Sha("a" * 40)
+    sha_b = Sha("b" * 40)
+
+    qf_a = f"baselines:\n- sha: {sha_b}\n  ref: refs/heads/b\n"
+    qf_b = f"baselines:\n- sha: {sha_a}\n  ref: refs/heads/a\n"
+
+    class CommitStub:
+        def __init__(self, sha: Sha):
+            self.sha = sha
+
+    class GitStub:
+        def __call__(self, *args, **_):
+            assert len(args) == 2
+            assert args[0] == "show"
+            assert args[1].endswith(".git-queue")
+            ref_qf: str = args[1]
+            if ref_qf.startswith("refs/heads/a:"):
+                return qf_a
+            elif ref_qf.startswith("refs/heads/b:"):
+                return qf_b
+            raise GitFailed(f"unexpected show: {args}", rc=1)
+
+        def commit(self, ref: str) -> CommitStub:
+            if ref == "refs/heads/a":
+                return CommitStub(sha_a)
+            elif ref == "refs/heads/b":
+                return CommitStub(sha_b)
+            raise GitFailed(f"unexpected ref: {ref}", rc=1)
+
+    token = contextGit.set(GitStub())  # type: ignore[arg-type]
+    try:
+        assert not Queue.needs_rebase("refs/heads/a")
+    finally:
+        contextGit.reset(token)
 
 
 def test_rebase2_cherry(repo: Git):

@@ -249,9 +249,11 @@ class Queue:
     # tracking it, detect that.
 
     @classmethod
-    def needs_rebase(cls, ref: str | None) -> bool:
+    def needs_rebase(cls, ref: str | None, seen: frozenset[str] = frozenset()) -> bool:
         "Return True if the local queue branch at ref has baselines that have been updated."
         if ref is None or not ref.startswith("refs/heads/"):
+            return False
+        if ref in seen:
             return False
         git = contextGit.get()
         try:
@@ -259,10 +261,11 @@ class Queue:
         except GitFailed:
             return False
         qf = yaml.load(StringIO(content), Loader=Loader)
+        seen = seen | {ref}
         for b in qf.baselines:
             if refresh_baseline(b, git=git).sha != b.sha:
                 return True
-            if cls.needs_rebase(b.ref):
+            if cls.needs_rebase(b.ref, seen):
                 return True
         return False
 
