@@ -262,6 +262,8 @@ class Queue:
         for b in qf.baselines:
             if refresh_baseline(b, git=git).sha != b.sha:
                 return True
+            if cls.needs_rebase(b.ref):
+                return True
         return False
 
 

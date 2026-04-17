@@ -319,6 +319,60 @@ def test_recursive_rebase_conflict(repo: Git):
     ]
 
 
+def test_recursive_rebase_deep(repo: Git):
+    """
+    Test that recursive rebase works on a longer chain of queues based on each other.
+    """
+    repo.c("0")
+
+    # base → foo → bar → baz
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b foo base")
+    repo.c("foo1")
+    repo.s("git queue init -b bar foo")
+    repo.c("bar1")
+    repo.s("git queue init -b baz bar")
+    repo.c("baz1")
+    assert repo.log() == [
+        "0",
+        "base1",
+        "baseline",
+        "foo1",
+        "baseline",
+        "bar1",
+        "baseline",
+        "baz1",
+    ]
+
+    # Update base so the whole chain is out of date
+    repo.s("git checkout base")
+    repo.c("base2")
+
+    # Rebase baz — should rebase foo and bar first, then baz
+    repo.s("git checkout baz")
+    repo.s("git queue rebase")
+
+    repo.s("git checkout foo")
+    assert repo.log() == ["0", "base1", "base2", "baseline", "foo1"]
+
+    repo.s("git checkout bar")
+    assert repo.log() == ["0", "base1", "base2", "baseline", "foo1", "baseline", "bar1"]
+
+    repo.s("git checkout baz")
+    assert repo.log() == [
+        "0",
+        "base1",
+        "base2",
+        "baseline",
+        "foo1",
+        "baseline",
+        "bar1",
+        "baseline",
+        "baz1",
+    ]
+
+
 def test_rebase2_cherry(repo: Git):
     """
     Test that rebase skips commits that have been cherry-picked down into
