@@ -84,18 +84,16 @@ class Main(continuations.Main):
 
         with self.setup():
             commit = self.git.commit(args.commit)
-            sha = commit.sha
-            target = self.git.abbrev(sha)
             status = (
-                f"Splitting {target}.\n"
+                f"Splitting {commit.summary}.\n"
                 + "Changes from the commit are now staged.\n"
                 + "Make one or more commits here."
             )
 
             with EditBranch(message="git-split"):
                 with edit_commit(commit, git=self.git, edit=True):
-                    with SuspendForAmend(target):
-                        with PickCherryWithReference(cherry=sha, reference=sha):
+                    with SuspendForAmend(commit.sha):
+                        with PickCherryWithReference(cherry=commit.sha, reference=commit.sha):
                             self.git("reset", "--soft", "HEAD^")
                             raise Suspend(status=status)
 

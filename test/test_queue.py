@@ -3,6 +3,7 @@ from io import StringIO
 
 import yaml
 
+from gitq.git import Sha
 from gitq.queue import QueueFile, Loader, Dumper
 
 
@@ -18,7 +19,7 @@ def test_yaml() -> None:
           This is a branch.
           Foo Bar Baz
         baselines:
-        - sha: xyz
+        - sha: abc1234
         - sha: abcdef
           ref: bar
           remote: https://example.com/project.git
@@ -29,10 +30,11 @@ def test_yaml() -> None:
     foo, bar = qf.baselines
     assert foo.ref is None
     assert foo.remote is None
-    assert foo.sha == "xyz"
+    assert foo.sha == "abc1234"
     assert bar.ref == "bar"
     assert bar.remote == "https://example.com/project.git"
     assert bar.sha == "abcdef"
+    assert all(isinstance(b.sha, Sha) for b in qf.baselines)
 
     with StringIO() as s:
         yaml.dump(qf, s, Dumper=Dumper)

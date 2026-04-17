@@ -1,6 +1,7 @@
 import yaml
 from textwrap import dedent
 from gitq.continuations import Continuations, Loader, Dumper, EditBranch, PickCherries
+from gitq.git import Sha
 
 
 def test_yaml_round_trip():
@@ -30,7 +31,7 @@ def test_yaml_round_trip():
 
 def test_yaml_no_status():
     c = Continuations(
-        continuations=[PickCherries(cherries=["abc", "def"], edit=False)],
+        continuations=[PickCherries(cherries=[Sha("abc"), Sha("def")], edit=False)],
         tool="split",
     )
     serialized = yaml.dump(c, Dumper=Dumper)

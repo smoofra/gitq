@@ -294,7 +294,7 @@ def TempBranch() -> Iterator[str]:
 
 
 @contextmanager
-def CheckoutBaseline(sha: str | None):
+def CheckoutBaseline(sha: Sha | None):
     """
     Checkout a baseline commit, or if argument is None, create a temporary
     branch with no history and check that out.
@@ -304,7 +304,7 @@ def CheckoutBaseline(sha: str | None):
         with TempBranch():
             yield
     else:
-        git.checkout(Sha(sha))
+        git.checkout(sha)
         yield
 
 
@@ -369,7 +369,7 @@ class CheckoutBranch(Finally):
 class PickCherries(Continuation):
     "Yield, then cherry-pick specified commits."
 
-    cherries: List[str]
+    cherries: List[Sha]
     edit: bool = field(default=False)
 
     @contextmanager
@@ -387,7 +387,7 @@ class CherryPickContinue(Continuation):
     do it for them if they have't.
     """
 
-    ref: str
+    ref: Sha
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -409,7 +409,7 @@ def cherry_pick(cherry: Commit, *, edit: bool = False) -> None:
     with Heading(f"Cherry picking {cherry.summary}", quiet=True):
         try:
             git.cmd(
-                ["git", "cherry-pick", "--quiet", "--allow-empty", Sha(cherry.sha)],
+                ["git", "cherry-pick", "--quiet", "--allow-empty", cherry.sha],
                 comment=cherry.title,
             )
         except GitFailed:

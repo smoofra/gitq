@@ -44,7 +44,7 @@ class DupRecord(NamedTuple):
     "a record output by `git cherry`"
 
     is_new: bool
-    sha: str
+    sha: Sha
 
     @property
     def is_duplicate(self):
@@ -67,12 +67,14 @@ def coalesce(lines: Iterable[str]) -> Iterator[str]:
 
 
 class Sha(str):
-    pass
+    def __new__(cls, value: str) -> Sha:
+        assert re.match(r"^[0-9a-f]+$", value, flags=re.IGNORECASE)
+        return super().__new__(cls, value)
 
 
 class Commit(object):
 
-    parents: List[str]
+    parents: List[Sha]
 
     def __init__(self, *, log: str):
         self.parents = list()
@@ -80,9 +82,9 @@ class Commit(object):
         for header in coalesce(headers.split("\n")):
             (key, value) = header.strip().split(" ", 1)
             if key == "commit":
-                self.sha = value
+                self.sha = Sha(value)
             if key == "parent":
-                self.parents.append(value)
+                self.parents.append(Sha(value))
             if key == "tree":
                 self.tree = value
             if key == "author":
@@ -171,17 +173,17 @@ class Git:
             raise GitFailed("git failed", rc=proc.wait())
         return not proc.wait()
 
-    def rev_parse(self, commit: str) -> str:
-        return self.cmd(["git", "rev-parse", commit], quiet=True).strip()
+    def rev_parse(self, commit: str) -> Sha:
+        return Sha(self.cmd(["git", "rev-parse", commit], quiet=True).strip())
 
     def symbolic_full_name(self, commit: str) -> str | None:
         name = self.cmd(["git", "rev-parse", "--symbolic-full-name", commit], quiet=True).strip()
         return name or None
 
     def detach(self) -> None:
-        self.cmd(["git", "checkout", Sha(self.rev_parse("HEAD"))], stderr=FNULL, comment="detach")
+        self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL, comment="detach")
 
-    def upstream(self, branch: str) -> str | None:
+    def upstream(self, branch: str) -> Sha | None:
         "return the sha of the branch's upstream, or None"
         try:
             return self.rev_parse(branch + "@{upstream}")
@@ -332,9 +334,9 @@ class Git:
         assert (p.returncode == 0) == (not conflicts)
         return tree, set(conflicts)
 
-    def checkout_tree(self, tree: str) -> None:
+    def checkout_tree(self, tree: Sha) -> None:
         "replace index and working files with the specified tree"
-        deleted = self("diff", "--diff-filter=A", "--name-only", tree).splitlines()
+        deleted = self("diff", "--diff-filter=A", "--name-only", tree, quiet=True).splitlines()
         self("read-tree", tree)
         self("checkout", "--", ".")
         for rel in deleted:
@@ -349,7 +351,7 @@ class Git:
         for line in output.strip().splitlines():
             sign, sha = line.split(" ", 1)
             assert sign in "-+"
-            yield DupRecord(sign == "+", sha)
+            yield DupRecord(sign == "+", Sha(sha))
 
     def is_ancestor(self, ancestor: str, of: str = "HEAD") -> bool:
         "Return True if ancestor is reachable from descendant"

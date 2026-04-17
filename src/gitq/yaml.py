@@ -1,7 +1,11 @@
-from typing import Self
+import types
+import typing
+from typing import Any, Self, Type
 from dataclasses import fields, is_dataclass, Field
 
 import yaml
+
+from .git import Sha
 
 
 class YAMLObjectMetaclass(yaml.YAMLObjectMetaclass):
@@ -52,6 +56,25 @@ class YAMLObject(yaml.YAMLObject, metaclass=YAMLObjectMetaclass):
         return yaml.MappingNode(cls.yaml_tag, list(i()))
 
 
+yaml.add_representer(
+    Sha, lambda dumper, data: dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+)
+
+
+def coerce(value: Any, hint: Type) -> Any:
+    origin = typing.get_origin(hint)
+    args = typing.get_args(hint)
+    if origin is typing.Union or isinstance(hint, types.UnionType):
+        if [a for a in args if a is not type(None)] == [Sha]:
+            return Sha(value)
+    elif origin is list and args and isinstance(value, list):
+        if args == (Sha,):
+            return list(map(Sha, value))
+    elif hint == Sha:
+        return Sha(value)
+    return value
+
+
 class BaseLoader(yaml.SafeLoader):
 
     # By default, PyYAML uses __new__() and .__dict__.update() to construct
@@ -59,4 +82,9 @@ class BaseLoader(yaml.SafeLoader):
     # defaults are respected and unknown fields raise exceptions.
     def construct_yaml_object(self, node, cls):
         state = self.construct_mapping(node, deep=True)
+        if is_dataclass(cls):
+            hints = typing.get_type_hints(cls)
+            for f in fields(cls):
+                if f.name in state and f.name in hints:
+                    state[f.name] = coerce(state[f.name], hints[f.name])
         return cls(**state)  # type: ignore

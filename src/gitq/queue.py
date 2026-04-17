@@ -38,7 +38,7 @@ class Baseline(YAMLObject):
     yaml_loader = Loader
     yaml_dumper = Dumper
 
-    sha: str
+    sha: Sha
     ref: str | None = field(default=None)
     remote: str | None = field(default=None)
 
@@ -214,7 +214,7 @@ class Queue:
                 continue
             yield commit
 
-    def baselines_for_swap(self) -> Iterator[str]:
+    def baselines_for_swap(self) -> Iterator[Sha]:
         "return a list of shas that git-swap should not proceed past"
         for b in self.qf.baselines:
             yield b.sha
@@ -350,8 +350,8 @@ class MergeContinue(Continuation):
     if they haven't.
     """
 
-    head: str
-    to_merge: str
+    head: Sha
+    to_merge: Sha
 
     @property
     def status(self) -> str:
@@ -379,10 +379,10 @@ class MergeContinue(Continuation):
 class MergeBaselines(Step, Continuation):
 
     qf: QueueFile
-    user_merges: List[str] = field(default_factory=list)
+    user_merges: List[Sha] = field(default_factory=list)
     find_user_merges: bool = True
     needs_checkout: bool = True
-    suspended_at: str | None = None
+    suspended_at: Sha | None = None
 
     def run(self) -> None:
         with self:
@@ -398,7 +398,7 @@ class MergeBaselines(Step, Continuation):
                 # up and add it to the list of user merges, and go back to the
                 # commit we were at before.
                 self.user_merges.append(self.git.rev_parse("HEAD"))
-                self.git.checkout(Sha(self.suspended_at))
+                self.git.checkout(self.suspended_at, comment="go back")
                 self.suspended_at = None
             self.merge_baselines()
 
@@ -448,17 +448,20 @@ class MergeBaselines(Step, Continuation):
         q = self.q
 
         if len(self.user_merges) > 1:
-            self.user_merges = (
-                self.git("merge-base", "--independent", *self.user_merges, quiet=True)
-                .strip()
-                .splitlines()
+            self.user_merges = list(
+                map(
+                    Sha,
+                    self.git("merge-base", "--independent", *self.user_merges, quiet=True)
+                    .strip()
+                    .splitlines(),
+                )
             )
 
         # First, check out one of the baselines so there's something to
         # merge into
         if self.needs_checkout:
             b0 = self.qf.baselines[0]
-            self.git.checkout(Sha(b0.sha), comment=b0.title)
+            self.git.checkout(b0.sha, comment=b0.title)
             self.needs_checkout = False
 
         needed = list(self.still_needed())
@@ -468,7 +471,7 @@ class MergeBaselines(Step, Continuation):
 
         # try octopus merge first
         try:
-            self.git("merge", "--no-ff", *(Sha(b.sha) for b in needed), "-m", self.m)
+            self.git("merge", "--no-ff", *(b.sha for b in needed), "-m", self.m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
@@ -482,7 +485,7 @@ class MergeBaselines(Step, Continuation):
         # try octopus with user merges
         try:
             shas = [*(b.sha for b in needed), *self.user_merges]
-            self.git("merge", "--no-ff", *(Sha(s) for s in shas), "-m", self.m)
+            self.git("merge", "--no-ff", *(s for s in shas), "-m", self.m)
         except GitFailed:
             if (self.git.gitdir / "MERGE_HEAD").exists():
                 if self.git.unmerged_files() == {q.queuefile_name}:
@@ -499,7 +502,7 @@ class MergeBaselines(Step, Continuation):
             with Heading(f"Merging {baseline.summary}"):
                 try:
                     self.git(
-                        "merge", "--no-ff", Sha(baseline.sha), "-m", self.m, comment=baseline.title
+                        "merge", "--no-ff", baseline.sha, "-m", self.m, comment=baseline.title
                     )
                 except GitFailed:
                     if not self.git.merge_in_progress:
@@ -528,13 +531,11 @@ class MergeBaselines(Step, Continuation):
         for u in self.user_merges:
             contains_baseline = self.git.is_ancestor(baseline.sha, of=u)
             if self.git.rev_parse("HEAD") != head:
-                self.git.checkout(Sha(head))
+                self.git.checkout(head)
 
             # try to merge u
             try:
-                self.git(
-                    "merge", "--no-ff", Sha(u), "-m", self.m, comment=self.git.commit(u).title
-                )
+                self.git("merge", "--no-ff", u, "-m", self.m, comment=self.git.commit(u).title)
             except GitFailed:
                 if not self.git.merge_in_progress:
                     raise
@@ -557,9 +558,7 @@ class MergeBaselines(Step, Continuation):
 
             # See if baseline will merge now
             try:
-                self.git(
-                    "merge", "--no-ff", Sha(baseline.sha), "-m", self.m, comment=baseline.title
-                )
+                self.git("merge", "--no-ff", baseline.sha, "-m", self.m, comment=baseline.title)
             except GitFailed:
                 if not self.git.merge_in_progress:
                     raise
@@ -581,9 +580,9 @@ class MergeBaselines(Step, Continuation):
             raise Exception
 
         self.suspended_at = head
-        self.git.checkout(Sha(commit.sha), comment=commit.title)
+        self.git.checkout(commit.sha, comment=commit.title)
         try:
-            self.git("merge", "-m", "resolved conflicts", Sha(to_merge))
+            self.git("merge", "-m", "resolved conflicts", to_merge)
             raise Exception("merge succeeded, but expected failure")
         except GitFailed:
             if not self.git.merge_in_progress:
