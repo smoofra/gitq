@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List
 import os
 import shutil
+import re
 
 import pytest
 
@@ -25,12 +26,18 @@ class Directory:
     def __truediv__(self, rel: str) -> Path:
         return self.path / rel
 
-    def s(self, command: str):
+    def s(self, command: str, *, check_error: str = ""):
         "run a shell command"
         Output.log_cmd(command)
         Output.flush()
+        c = ["bash", "-c", command]
         with Output.indent():
-            subprocess.run(["bash", "-c", command], check=True, cwd=self.path, stderr=sys.stdout)
+            if check_error:
+                p = subprocess.run(c, cwd=self.path, text=True, capture_output=True)
+                assert p.returncode != 0
+                assert re.search(check_error, p.stdout)
+            else:
+                subprocess.run(c, check=True, cwd=self.path, stderr=sys.stdout)
 
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"

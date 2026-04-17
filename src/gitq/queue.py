@@ -465,6 +465,8 @@ class MergeBaselines(Step, Continuation):
         # First, check out one of the baselines so there's something to
         # merge into
         if self.needs_checkout:
+            if not self.qf.baselines:
+                raise UserError("Cannot rebase queue onto zero baselines.")
             b0 = self.qf.baselines[0]
             self.git.checkout(b0.sha, comment=b0.title)
             self.needs_checkout = False

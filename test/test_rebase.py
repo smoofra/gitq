@@ -321,6 +321,15 @@ def test_recursive_rebase_conflict(repo: Git):
     ]
 
 
+def test_rebase_remove_all_baselines(repo: Git):
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.c("patch1")
+    repo.s("git queue rebase --remove base", check_error="Cannot rebase queue onto zero baselines")
+
+
 def test_recursive_rebase_deep(repo: Git):
     """
     Test that recursive rebase works on a longer chain of queues based on each other.
