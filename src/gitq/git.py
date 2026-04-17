@@ -4,6 +4,7 @@ import re
 from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
 from pathlib import Path
 from contextvars import ContextVar
+from functools import cache
 
 from .output import Output
 
@@ -93,8 +94,12 @@ class Commit(object):
         self.message = "\n".join(lines) + "\n"
 
     @property
+    def abbrev(self):
+        return contextGit.get().abbrev(self.sha)
+
+    @property
     def summary(self) -> str:
-        return f"{self.sha[:10]} {self.title}"
+        return f"{self.abbrev} {self.title}"
 
     @property
     def is_merge(self) -> bool:
@@ -340,6 +345,7 @@ class Git:
         "Return True if ancestor is reachable from descendant"
         return self.cmd_test(["git", "merge-base", "--is-ancestor", ancestor, of])
 
+    @cache
     def abbrev(self, ref: str) -> str:
         "Return abbreviated sha for ref"
         return self.cmd(["git", "rev-parse", "--short", ref], quiet=True).strip()
