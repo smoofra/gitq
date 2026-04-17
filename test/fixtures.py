@@ -30,13 +30,13 @@ class Directory:
         Output.log_cmd(command)
         Output.flush()
         with Output.indent():
-            subprocess.run(command, shell=True, check=True, cwd=self.path, stderr=sys.stdout)
+            subprocess.run(["bash", "-c", command], check=True, cwd=self.path, stderr=sys.stdout)
 
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"
         Output.flush()
         with Output.indent():
-            proc = subprocess.run(command, shell=True, cwd=self.path, stderr=sys.stdout)
+            proc = subprocess.run(["bash", "-c", command], cwd=self.path, stderr=sys.stdout)
             return proc.returncode == 0
 
     def w(self, filename: str, content: str):
