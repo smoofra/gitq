@@ -134,7 +134,7 @@ class Commit(object):
         filename = self.git("log", "-1", "--format=%f", self.sha, quiet=True).strip() + ".patch"
         path = directory / filename
         with open(path, "wt") as f:
-            cmd = ["git", "show", "--format=" + format, self.sha]
+            cmd = ["git", "show", "--diff-merges=first-parent", "--format=" + format, self.sha]
             subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory)
         return path
 

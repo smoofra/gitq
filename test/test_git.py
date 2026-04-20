@@ -2,6 +2,7 @@ import email
 import email.utils
 import hashlib
 import multiprocessing
+import re
 import pytest
 import os
 from pathlib import Path
@@ -133,15 +134,15 @@ def test_gpgsig():
     assert c.title == "chore: remove unused line from Cargo.toml"
 
 
+j_random = dict(
+    GIT_COMMITTER_NAME="J. Random Hacker",
+    GIT_COMMITTER_EMAIL="j@example.com",
+    GIT_COMMITTER_DATE="2000-01-01T00:00:00 +0000",
+)
+
+
 def test_patch(repo):
     repo.c("0")
-
-    j_random = dict(
-        GIT_COMMITTER_NAME="J. Random Hacker",
-        GIT_COMMITTER_EMAIL="j@example.com",
-        GIT_COMMITTER_DATE="2000-01-01T00:00:00 +0000",
-    )
-
     with env(**j_random):
         repo.c("do a thing\n\nwith some details", filename="a")
     patch = repo.commit("HEAD").make_patch_file(repo)
@@ -166,3 +167,52 @@ def test_patch(repo):
     assert A.committer == B.committer
     assert A.message == B.message
     assert A.sha == B.sha
+
+
+def test_patch_merge(repo):
+    repo.c("0")
+    repo.s("git checkout -q -b b")
+    repo.c("b")
+    repo.s("git checkout -q master")
+    repo.c("a")
+    with env(**j_random):
+        repo.s("git merge -q b -m 'merge some commits\n\nblah blah blah\n'")
+    patch = repo.commit("HEAD").make_patch_file(repo)
+    A = repo.commit("HEAD")
+
+    msg = email.message_from_string(patch.read_text())
+
+    committer_name, committer_addr = email.utils.parseaddr(msg["X-Gitq-Committer"])
+    committer_date = msg["X-Gitq-CommitterDate"]
+    author_name, author_addr = email.utils.parseaddr(msg["From"])
+    author_date = msg["Date"]
+    parents = msg["X-Gitq-Parents"].split()
+    assert len(parents) == 2
+
+    subject = msg["Subject"]
+    assert subject.startswith("[PATCH] ")
+    title = subject[len("[PATCH] ") :]
+    body_raw = msg.get_payload()
+    assert isinstance(body_raw, str)
+    sep = re.search(r"\n---\n|\ndiff ", body_raw)
+    commit_body = body_raw[: sep.start()].strip() if sep else body_raw.strip()
+    commit_message = title + "\n" if not commit_body else title + "\n\n" + commit_body + "\n"
+
+    repo.cmd(["git", "read-tree", parents[0]], quiet=True)
+    repo.s(f"git apply --cached {patch}")
+    tree = repo.cmd(["git", "write-tree"], quiet=True).strip()
+
+    with env(
+        GIT_AUTHOR_NAME=author_name,
+        GIT_AUTHOR_EMAIL=author_addr,
+        GIT_AUTHOR_DATE=author_date,
+        GIT_COMMITTER_NAME=committer_name,
+        GIT_COMMITTER_EMAIL=committer_addr,
+        GIT_COMMITTER_DATE=committer_date,
+    ):
+        B_sha = repo.cmd(
+            ["git", "commit-tree", tree, "-p", parents[0], "-p", parents[1], "-m", commit_message],
+            quiet=True,
+        ).strip()
+
+    assert A.sha == B_sha
