@@ -75,8 +75,11 @@ class Baseline(YAMLObject):
         return self._summary()[1]
 
 
-yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
-yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
+@dataclass
+class Patch(YAMLObject):
+
+    yaml_loader = Loader
+    yaml_dumper = Dumper
 
 
 @dataclass
@@ -88,6 +91,10 @@ class QueueFile(YAMLObject):
     title: str | None = field(default=None)
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
+
+
+yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
+yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
 
 
 # These can appear in continuation files (e.g. as RebaseOne.onto), so register there too.

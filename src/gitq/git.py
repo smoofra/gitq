@@ -75,8 +75,10 @@ class Sha(str):
 class Commit(object):
 
     parents: List[Sha]
+    git: "Git"
 
-    def __init__(self, *, log: str):
+    def __init__(self, *, log: str, git: "Git"):
+        self.git = git
         self.parents = list()
         (headers, message) = log.split("\n\n", 1)
         for header in coalesce(headers.split("\n")):
@@ -117,6 +119,24 @@ class Commit(object):
 
     def __str__(self) -> str:
         return self.sha[:10]
+
+    def make_patch_file(self, directory: Path) -> Path:
+        format = (
+            "From %H Mon Sep 17 00:00:00 2001"
+            + "%nFrom: %aN <%aE>"
+            + "%nDate: %aD"
+            + "%nSubject: [PATCH] %s"
+            + "%nX-Gitq-Committer: %cN <%cE>"
+            + "%nX-Gitq-CommitterDate: %cD"
+            + "%nX-Gitq-Parents: %P"
+            + "%n%n%b"
+        )
+        filename = self.git("log", "-1", "--format=%f", self.sha, quiet=True).strip() + ".patch"
+        path = directory / filename
+        with open(path, "wt") as f:
+            cmd = ["git", "show", "--format=" + format, self.sha]
+            subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory)
+        return path
 
 
 class Git:
@@ -203,7 +223,7 @@ class Git:
 
     def commit(self, ref: str) -> Commit:
         log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref, "--"], quiet=True)
-        return Commit(log=log)
+        return Commit(log=log, git=self)
 
     def commits(self, *refs: str, reverse: bool = False) -> List[Commit]:
         cmd = ["git", "log", "--topo-order", "-z", "--no-notes", "--pretty=raw"]
@@ -212,7 +232,7 @@ class Git:
         cmd.extend(refs)
         cmd.append("--")
         logs = self.cmd(cmd, quiet=True)
-        return [Commit(log=log) for log in logs.split("\x00") if log]
+        return [Commit(log=log, git=self) for log in logs.split("\x00") if log]
 
     def checkout(self, branch: str, *, comment: str = "") -> None:
         self.cmd(["git", "checkout", branch], stderr=FNULL, comment=comment)

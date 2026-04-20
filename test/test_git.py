@@ -1,3 +1,5 @@
+import email
+import email.utils
 import hashlib
 import multiprocessing
 import pytest
@@ -6,7 +8,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from gitq.git import split_author, Git, UserError, Commit
-from .fixtures import repo
+from .fixtures import repo, env
 
 _ = repo
 
@@ -126,6 +128,41 @@ def test_gpgsig():
         hashlib.sha1(yara_sample.encode()).hexdigest()
         == "6ae64024af9a0a5afedbe336b04b4f731b972439"
     )
-    c = Commit(log=yara_sample)
+    c = Commit(log=yara_sample, git=None)  # type: ignore
     assert c.sha == "6340719ff7030a087407749e7c65ccbb5e84fa1b"
     assert c.title == "chore: remove unused line from Cargo.toml"
+
+
+def test_patch(repo):
+    repo.c("0")
+
+    j_random = dict(
+        GIT_COMMITTER_NAME="J. Random Hacker",
+        GIT_COMMITTER_EMAIL="j@example.com",
+        GIT_COMMITTER_DATE="2000-01-01T00:00:00 +0000",
+    )
+
+    with env(**j_random):
+        repo.c("do a thing\n\nwith some details", filename="a")
+    patch = repo.commit("HEAD").make_patch_file(repo)
+    A = repo.commit("HEAD")
+    repo.s("git reset -q --hard HEAD^")
+    repo.s(f"git am {patch}")
+    msg = email.message_from_string(patch.read_text())
+    committer_name, committer_addr = email.utils.parseaddr(msg["X-Gitq-Committer"])
+    committer_date = msg["X-Gitq-CommitterDate"]
+    with env(
+        GIT_COMMITTER_NAME=committer_name,
+        GIT_COMMITTER_EMAIL=committer_addr,
+        GIT_COMMITTER_DATE=committer_date,
+    ):
+        repo.s("git commit --amend --no-edit")
+    B = repo.commit("HEAD")
+    repo.s(f"git diff {A.sha} {B.sha}")
+
+    assert A.parents == B.parents
+    assert A.tree == B.tree
+    assert A.author == B.author
+    assert A.committer == B.committer
+    assert A.message == B.message
+    assert A.sha == B.sha

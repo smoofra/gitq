@@ -6,6 +6,7 @@ from typing import List
 import os
 import shutil
 import re
+from contextlib import contextmanager
 
 import pytest
 
@@ -118,3 +119,19 @@ def repo(tmp_path: Path) -> Git:
 
     repo = Git(tmp_path)
     return repo
+
+
+@contextmanager
+def env(**kw):
+    old: dict[str, str | None] = dict()
+    for key, value in kw.items():
+        old[key] = os.environ.get(key, None)
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, value in old.items():
+            if value is None:
+                del os.environ[key]
+            else:
+                os.environ[key] = value
