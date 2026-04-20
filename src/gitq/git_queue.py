@@ -138,6 +138,8 @@ class Main(continuations.Main):
             return
 
         if args.command == "commit":
+            if not self.git.is_clean():
+                raise UserError("Error: repo not clean")
             q = Queue(self.git)
             with Heading("Committing changes to queue"):
                 if args.branch:
