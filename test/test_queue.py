@@ -81,3 +81,46 @@ def test_tidy(repo: Git):
 
     assert repr0 != repr1
     assert qf0 == qf1
+
+
+def test_commit(repo: Git):
+    repo.c("0")
+    repo.s("git branch -m base")
+    repo.s("git checkout -q -b q")
+    repo.c("a")
+    repo.c("b")
+    repo.s("git queue init base")
+    repo.s("git queue rebase")
+
+    repo.s("git queue commit -m 1 -b mq")
+
+    repo.s("git checkout -q -b base2 base")
+    repo.c("c")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue add base2")
+
+    repo.s("git config set branch.q.gitq.historiography refs/heads/mq")
+    repo.s("git queue commit -m 2")
+
+    changed = {
+        x.strip() for x in repo("show", "--format=", "--name-only", "mq").strip().splitlines()
+    }
+
+    assert changed == {
+        ".git-queue",
+        "c",
+        "patches/0-baseline.patch",
+        "patches/0-merged-baselines.patch",
+        "patches/1-a.patch",
+        "patches/2-b.patch",
+    }
+
+    diff_q_mq = {x.strip() for x in repo("diff", "--name-only", "q", "mq").strip().splitlines()}
+
+    assert diff_q_mq == {
+        ".git-queue",
+        "patches/0-merged-baselines.patch",
+        "patches/1-a.patch",
+        "patches/2-b.patch",
+    }

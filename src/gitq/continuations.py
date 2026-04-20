@@ -348,6 +348,7 @@ class CheckoutBranch(Finally):
 
     branch: str
     old_branch: str | None = field(default=None)
+    orphan: bool = field(default=False)
 
     def cleanup(self):
         if self.old_branch is not None:
@@ -360,7 +361,11 @@ class CheckoutBranch(Finally):
             self.old_branch = self.git.head()
             if self.old_branch.startswith("refs/heads/"):
                 self.old_branch = self.old_branch.removeprefix("refs/heads/")
-            self.git.checkout(self.branch.removeprefix("refs/heads/"), comment="checkout branch")
+            self.git.checkout(
+                self.branch.removeprefix("refs/heads/"),
+                comment="checkout branch",
+                orphan=self.orphan,
+            )
         with super().impl():
             yield
 

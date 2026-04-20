@@ -4,6 +4,7 @@ import re
 from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
 from pathlib import Path
 from contextvars import ContextVar
+from contextlib import contextmanager
 from functools import cache
 
 from .output import Output
@@ -68,7 +69,8 @@ def coalesce(lines: Iterable[str]) -> Iterator[str]:
 
 class Sha(str):
     def __new__(cls, value: str) -> "Sha":
-        assert re.match(r"^[0-9a-f]+$", value, flags=re.IGNORECASE)
+        if not re.match(r"^[0-9a-f]+$", value, flags=re.IGNORECASE):
+            breakpoint()
         return super().__new__(cls, value)
 
 
@@ -120,7 +122,7 @@ class Commit(object):
     def __str__(self) -> str:
         return self.sha[:10]
 
-    def make_patch_file(self, directory: Path) -> Path:
+    def make_patch_file(self, directory: Path, *, index: Tuple[int, int] | None = None) -> Path:
         format = (
             "From %H Mon Sep 17 00:00:00 2001"
             + "%nFrom: %aN <%aE>"
@@ -132,6 +134,9 @@ class Commit(object):
             + "%n%n%b"
         )
         filename = self.git("log", "-1", "--format=%f", self.sha, quiet=True).strip() + ".patch"
+        if index is not None:
+            i, num_digits = index
+            filename = f"{i:0{num_digits}d}-{filename}"
         path = directory / filename
         with open(path, "wt") as f:
             cmd = ["git", "show", "--diff-merges=first-parent", "--format=" + format, self.sha]
@@ -218,6 +223,12 @@ class Git:
         except GitFailed:
             return self.rev_parse("HEAD")
 
+    def branch(self) -> str | None:
+        head = self.head()
+        if head.startswith("refs/heads/"):
+            return head.removeprefix("refs/heads/")
+        return None
+
     def force_checkout(self, branch: str, comment: str = "") -> None:
         self.cmd(["git", "checkout", "-f", branch], stderr=FNULL, comment=comment)
 
@@ -234,8 +245,12 @@ class Git:
         logs = self.cmd(cmd, quiet=True)
         return [Commit(log=log, git=self) for log in logs.split("\x00") if log]
 
-    def checkout(self, branch: str, *, comment: str = "") -> None:
-        self.cmd(["git", "checkout", branch], stderr=FNULL, comment=comment)
+    def checkout(self, branch: str, *, comment: str = "", orphan: bool = False) -> None:
+        if orphan:
+            cmd = ["git", "checkout", "--orphan", branch]
+        else:
+            cmd = ["git", "checkout", branch]
+        self.cmd(cmd, stderr=FNULL, comment=comment)
 
     @property
     def continuation(self) -> Path:
@@ -388,3 +403,13 @@ class Git:
         if abbrev := self.cmd(cmd, quiet=True).strip():
             return abbrev
         return ref
+
+    @contextmanager
+    def temp_index_and_files(self, *, check_clean: bool = True):
+        if check_clean and not self.is_clean():
+            Output.print(self("status"))
+            raise Exception("repo is not clean")
+        try:
+            yield
+        finally:
+            self.cmd(["git", "reset", "--hard", "HEAD"])

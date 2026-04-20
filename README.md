@@ -7,11 +7,6 @@ This is currently a work in progress.  Planned features for `git-queue` include:
 *  Unapplied patches.  If rebase fails due to conflicts, give the user the
    choice to save commits as patch files to be applied later.
 
-* Queue history.   Allow queues to be committed to git history so previous
-  versions of the queue are not lost when history is edited.   This is
-  intended to be used for long-standing patch sets with no prospect of
-  being merged upstream.
-
 ## Description
 
 This is my second attempt to make a git-based patch queue tool.
@@ -141,6 +136,25 @@ Print the current operation status.
 ### `git queue tidy`
 
 Normalize and rewrite the `.git-queue` file in the current branch.
+
+### `git queue commit`
+
+Commit changes to a queue to a *historiography*.
+
+Git tracks changes to files in a commit history.  `git-queue` can track
+changes to a queue to a history of histories, aka a historiography.
+
+A historiography is itself represented as a git history, but the files
+being tracked represent a queue, that is a set of changes from a specified
+baseline.
+
+This is done by serializing the commits in the queue (but not the
+baselines), into patch files, in almost the same format that
+`git format-patch` uses.   Unlike `git-format-patch`, git `git-queue`
+records the committer, committer date, and parents of each commit in the
+patch file.   This means that the patch files recorded in a historiography
+have enough information to reconstruct the exact original commit shas that
+they were created from.
 
 
 ## `git-swap`

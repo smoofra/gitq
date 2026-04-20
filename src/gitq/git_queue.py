@@ -104,6 +104,14 @@ class Main(continuations.Main):
             description="Abort a suspended operation and restore previous state.",
         )
 
+        commit_parser = subs.add_parser(
+            "commit", help="commit changes to queue to a historiography"
+        )
+        commit_parser.add_argument("--message", "-m", type=str, default="", help="commit message")
+        commit_parser.add_argument(
+            "--branch", "-b", type=str, default="", help="historiography branch"
+        )
+
         args = parser.parse_args()
         if args.command is None:
             parser.print_usage()
@@ -127,6 +135,14 @@ class Main(continuations.Main):
                     q = yaml.load(f, Loader=Loader)
                 with open(queuefile, "w") as f:
                     yaml.dump(q, f, Dumper=Dumper)
+            return
+
+        if args.command == "commit":
+            q = Queue(self.git)
+            if args.branch:
+                q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
+            else:
+                q.commit(message=args.message, meta_branch=q.historiography_branch())
             return
 
         with self.setup():

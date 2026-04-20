@@ -1,9 +1,12 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Iterator
 from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cached_property
+import email.utils
+import os
+import re
 
 import yaml
 
@@ -91,6 +94,7 @@ class QueueFile(YAMLObject):
     title: str | None = field(default=None)
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
+    commits: List[str] | None = field(default=None)
 
 
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
@@ -152,11 +156,18 @@ class Queue:
                 self.qf = yaml.load(f, Loader=Loader)
 
     def save_queuefile(
-        self, *, amend: bool = False, commit_message: str = "", stage: bool | None = None
+        self,
+        qf: QueueFile | None = None,
+        *,
+        amend: bool = False,
+        commit_message: str = "",
+        stage: bool | None = None,
     ):
+        if qf is None:
+            qf = self.qf
         assert amend + (stage is not None) + bool(commit_message) == 1
         with open(self.queuefile_path, "w") as f:
-            yaml.dump(self.qf, f, Dumper=Dumper)
+            yaml.dump(qf, f, Dumper=Dumper)
         if stage or amend or commit_message:
             self.git("add", self.queuefile_path.relative_to(self.git.directory))
         if amend:
@@ -165,6 +176,8 @@ class Queue:
             self.git("commit", "--allow-empty", "-m", commit_message)
 
     def init(self):
+        if self.is_historiography:
+            raise UserError("This is a historiography.  Cannot init.")
         self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
         self.save_queuefile(amend=True)
 
@@ -249,6 +262,8 @@ class Queue:
         return bases[0]
 
     def rebase(self, onto: List[Baseline] | None = None) -> None:
+        if self.is_historiography:
+            raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
             Rebase(onto).run()
 
@@ -275,6 +290,120 @@ class Queue:
             if cls.needs_rebase(b.ref, seen):
                 return True
         return False
+
+    @property
+    def patch_directory(self) -> Path:
+        return self.git.directory / "patches"
+
+    def write_patches(self) -> Iterator[Path]:
+        os.makedirs(self.patch_directory, exist_ok=True)
+        commits = self.git.commits(*(f"^{b.sha}" for b in self.qf.baselines), "HEAD", reverse=True)
+        num_digits = len(str(len(commits) - 1))
+        for i, commit in enumerate(commits):
+            yield commit.make_patch_file(self.patch_directory, index=(i, num_digits))
+
+    @property
+    def is_historiography(self) -> bool:
+        return self.qf.commits is not None
+
+    def historiography_branch(self) -> str:
+        branch = self.git.branch()
+        if branch is None:
+            raise UserError("HEAD is not a branch")
+        try:
+            cfg = self.git("config", f"branch.{branch}.gitq.historiography", quiet=True).strip()
+            if not cfg.startswith("refs/heads/"):
+                raise Exception(f"Not a branch: {cfg}")
+            return cfg
+        except GitFailed as e:
+            raise UserError(
+                f"Commit to where?  Set config branch.{branch}.gitq.historiography"
+            ) from e
+
+    def commit(self, *, message: str = "", meta_branch: str):
+        sha = self.git.rev_parse("HEAD")
+
+        with self.git.temp_index_and_files():
+            qf = replace(self.qf)
+            qf.commits = list()
+            for patch in self.write_patches():
+                self.git("add", patch)
+                qf.commits.append(str(patch.relative_to(self.git.directory)))
+            self.save_queuefile(qf, stage=True)
+            tree = Sha(self.git("write-tree").strip())
+
+            with Heading("Checking round-trip"):
+                if Queue(self.git, qf=qf).recreate_queue(check_clean=False) != sha:
+                    raise Exception("re-created queue does not match original")
+
+        self.git("reset", "--hard", "HEAD")
+        for p in qf.commits:
+            (self.git.directory / p).unlink()
+
+        with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
+            self.git("read-tree", tree)
+            if message:
+                self.git.cmd(["git", "commit", "-m", message])
+            else:
+                self.git.cmd(["git", "commit"], interactive=True)
+
+    def recreate_queue(self, check_clean: bool = True) -> Sha:
+        if not self.qf.commits:
+            raise UserError("This is not a historiography branch")
+        for patch_path in self.qf.commits:
+            sha = self.recreate_commit(patch_path, check_clean=check_clean)
+        return sha  # type: ignore[possibly-undefined]
+
+    def recreate_commit(self, patch_path: str, *, check_clean: bool = True) -> Sha:
+        with self.git.temp_index_and_files(check_clean=check_clean):
+            with open(self.git.directory / patch_path, "r") as f:
+                envelope = next(iter(f))
+                f.seek(0)
+                msg = email.message_from_file(f)
+            msg.get_unixfrom
+            committer_name, committer_email = email.utils.parseaddr(msg["X-Gitq-Committer"])
+            committer_date = msg["X-Gitq-CommitterDate"]
+            author_name, author_email = email.utils.parseaddr(msg["From"])
+            author_date = msg["Date"]
+            parents = [Sha(x) for x in msg["X-Gitq-Parents"].split()]
+            title = msg["Subject"].removeprefix("[PATCH] ")
+            body_raw = msg.get_payload()
+            m = re.match(r"From ([0-9a-fA-F]+)", envelope)
+            if not parents or not isinstance(body_raw, str) or not m:
+                raise ValueError(f"bad patch: {patch_path}")
+            sha0 = Sha(m.group(1))
+            sep = re.search(r"\n---\n|\ndiff ", body_raw)
+            body = body_raw[: sep.start()].strip() if sep else body_raw.strip()
+            commit_message = title + "\n" if not body else title + "\n\n" + body + "\n"
+
+            self.git("read-tree", parents[0])
+            self.git("apply", "--cached", patch_path)
+            tree = Sha(self.git("write-tree").strip())
+
+            env = dict(os.environ)
+            env.update(
+                {
+                    "GIT_AUTHOR_NAME": author_name,
+                    "GIT_AUTHOR_EMAIL": author_email,
+                    "GIT_AUTHOR_DATE": author_date,
+                    "GIT_COMMITTER_NAME": committer_name,
+                    "GIT_COMMITTER_EMAIL": committer_email,
+                    "GIT_COMMITTER_DATE": committer_date,
+                }
+            )
+
+            def p():
+                for parent in parents:
+                    yield "-p"
+                    yield parent
+
+            cmd = ["git", "commit-tree", tree, *p(), "-m", commit_message]
+            sha = Sha(self.git.cmd(cmd, env=env).strip())
+
+            if sha0 != sha:
+                raise Exception("re-created sha does not match")
+
+            return sha
 
 
 @dataclass
