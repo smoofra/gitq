@@ -5,7 +5,7 @@ import yaml
 
 from .git import Git
 from .queue import QueueFile, Baseline, Queue, Loader, Dumper
-from .continuations import Abort, UserError
+from .continuations import Abort, UserError, Heading
 from . import continuations
 
 
@@ -139,10 +139,11 @@ class Main(continuations.Main):
 
         if args.command == "commit":
             q = Queue(self.git)
-            if args.branch:
-                q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
-            else:
-                q.commit(message=args.message, meta_branch=q.historiography_branch())
+            with Heading("Committing changes to queue"):
+                if args.branch:
+                    q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
+                else:
+                    q.commit(message=args.message, meta_branch=q.historiography_branch())
             return
 
         with self.setup():

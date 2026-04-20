@@ -405,11 +405,17 @@ class Git:
         return ref
 
     @contextmanager
-    def temp_index_and_files(self, *, check_clean: bool = True):
-        if check_clean and not self.is_clean():
+    def temp_index_and_files(self):
+        if not self.is_clean():
             Output.print(self("status"))
             raise Exception("repo is not clean")
         try:
             yield
         finally:
+            cmd = ["git", "diff", "--cached", "--name-only", "--diff-filter=A"]
+            new_files = self.cmd(cmd, quiet=True).strip().splitlines()
             self.cmd(["git", "reset", "--hard", "HEAD"])
+            for f in new_files:
+                path = self.directory / f
+                if path.exists():
+                    path.unlink()

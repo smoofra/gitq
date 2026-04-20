@@ -4,6 +4,7 @@ from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cached_property
+from tempfile import NamedTemporaryFile
 import email.utils
 import os
 import re
@@ -336,10 +337,6 @@ class Queue:
                 if Queue(self.git, qf=qf).recreate_queue(check_clean=False) != sha:
                     raise Exception("re-created queue does not match original")
 
-        self.git("reset", "--hard", "HEAD")
-        for p in qf.commits:
-            (self.git.directory / p).unlink()
-
         with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
             self.git("read-tree", tree)
             if message:
@@ -350,60 +347,58 @@ class Queue:
     def recreate_queue(self, check_clean: bool = True) -> Sha:
         if not self.qf.commits:
             raise UserError("This is not a historiography branch")
-        for patch_path in self.qf.commits:
-            sha = self.recreate_commit(patch_path, check_clean=check_clean)
+        with NamedTemporaryFile(prefix="index") as index:
+            for path in self.qf.commits:
+                sha = self.recreate_commit(path, index=index.name)
         return sha  # type: ignore[possibly-undefined]
 
-    def recreate_commit(self, patch_path: str, *, check_clean: bool = True) -> Sha:
-        with self.git.temp_index_and_files(check_clean=check_clean):
-            with open(self.git.directory / patch_path, "r") as f:
-                envelope = next(iter(f))
-                f.seek(0)
-                msg = email.message_from_file(f)
-            msg.get_unixfrom
-            committer_name, committer_email = email.utils.parseaddr(msg["X-Gitq-Committer"])
-            committer_date = msg["X-Gitq-CommitterDate"]
-            author_name, author_email = email.utils.parseaddr(msg["From"])
-            author_date = msg["Date"]
-            parents = [Sha(x) for x in msg["X-Gitq-Parents"].split()]
-            title = msg["Subject"].removeprefix("[PATCH] ")
-            body_raw = msg.get_payload()
-            m = re.match(r"From ([0-9a-fA-F]+)", envelope)
-            if not parents or not isinstance(body_raw, str) or not m:
-                raise ValueError(f"bad patch: {patch_path}")
-            sha0 = Sha(m.group(1))
-            sep = re.search(r"\n---\n|\ndiff ", body_raw)
-            body = body_raw[: sep.start()].strip() if sep else body_raw.strip()
-            commit_message = title + "\n" if not body else title + "\n\n" + body + "\n"
+    def recreate_commit(self, patch_path: str, *, index: str) -> Sha:
+        with open(self.git.directory / patch_path, "r") as f:
+            msg = email.message_from_file(f)
+        committer_name, committer_email = email.utils.parseaddr(msg["X-Gitq-Committer"])
+        committer_date = msg["X-Gitq-CommitterDate"]
+        author_name, author_email = email.utils.parseaddr(msg["From"])
+        author_date = msg["Date"]
+        parents = [Sha(x) for x in msg["X-Gitq-Parents"].split()]
+        title = msg["Subject"].removeprefix("[PATCH] ")
+        body_raw = msg.get_payload()
+        m = re.match(r"From ([0-9a-fA-F]+)", msg.get_unixfrom() or "")
+        if not parents or not isinstance(body_raw, str) or not m:
+            raise ValueError(f"bad patch: {patch_path}")
+        sha0 = Sha(m.group(1))
+        sep = re.search(r"\n---\n|\ndiff ", body_raw)
+        body = body_raw[: sep.start()].strip() if sep else body_raw.strip()
+        commit_message = title + "\n" if not body else title + "\n\n" + body + "\n"
 
-            self.git("read-tree", parents[0])
-            self.git("apply", "--cached", patch_path)
-            tree = Sha(self.git("write-tree").strip())
+        env = dict(os.environ)
+        env.update(
+            {
+                "GIT_INDEX_FILE": index,
+                "GIT_AUTHOR_NAME": author_name,
+                "GIT_AUTHOR_EMAIL": author_email,
+                "GIT_AUTHOR_DATE": author_date,
+                "GIT_COMMITTER_NAME": committer_name,
+                "GIT_COMMITTER_EMAIL": committer_email,
+                "GIT_COMMITTER_DATE": committer_date,
+            }
+        )
 
-            env = dict(os.environ)
-            env.update(
-                {
-                    "GIT_AUTHOR_NAME": author_name,
-                    "GIT_AUTHOR_EMAIL": author_email,
-                    "GIT_AUTHOR_DATE": author_date,
-                    "GIT_COMMITTER_NAME": committer_name,
-                    "GIT_COMMITTER_EMAIL": committer_email,
-                    "GIT_COMMITTER_DATE": committer_date,
-                }
-            )
+        self.git.cmd(["git", "read-tree", parents[0]], env=env, quiet=True)
+        self.git.cmd(["git", "apply", "--cached", patch_path], env=env, quiet=True)
+        tree = Sha(self.git.cmd(["git", "write-tree"], env=env, quiet=True).strip())
 
-            def p():
-                for parent in parents:
-                    yield "-p"
-                    yield parent
+        def p():
+            for parent in parents:
+                yield "-p"
+                yield parent
 
-            cmd = ["git", "commit-tree", tree, *p(), "-m", commit_message]
-            sha = Sha(self.git.cmd(cmd, env=env).strip())
+        cmd = ["git", "commit-tree", tree, *p(), "-m", commit_message]
+        sha = Sha(self.git.cmd(cmd, env=env, quiet=True).strip())
 
-            if sha0 != sha:
-                raise Exception("re-created sha does not match")
+        if sha0 != sha:
+            raise Exception("re-created sha does not match")
 
-            return sha
+        return sha
 
 
 @dataclass
