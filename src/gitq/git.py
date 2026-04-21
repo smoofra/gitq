@@ -213,7 +213,8 @@ class Git:
         try:
             return self.rev_parse(branch + "@{upstream}")
         except GitFailed as e:
-            if "no upstream configured for branch" in str(e):
+            errors = ["no upstream configured for branch", "HEAD does not point to a branch"]
+            if any(s in str(e) for s in errors):
                 return None
             raise
 

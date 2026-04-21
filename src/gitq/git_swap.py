@@ -20,7 +20,7 @@ from .continuations import (
 from . import continuations
 from .output import Output
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit, Sha
-from .queue import Queue, NotAQueue
+from .queue import Queue
 
 description = """Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history),
 while holding the final content constant.
@@ -295,6 +295,11 @@ class Main(continuations.Main):
             "--fixup", action="store_true", help="fixup instead of completing this swap"
         )
         parser.add_argument(
+            "--force",
+            action="store_true",
+            help="allow swap past the upstream, ie HEAD@{u}",
+        )
+        parser.add_argument(
             "--edit",
             "-e",
             action="store_true",
@@ -336,11 +341,12 @@ class Main(continuations.Main):
                 if args.up:
                     self.swap_up(args)
                 else:
-                    baselines = [upstream] if args.keep_going and upstream else []
-                    try:
+                    if Queue.is_queue(self.git):
                         baselines = list(Queue(self.git).baselines_for_swap())
-                    except NotAQueue:
-                        pass
+                    elif upstream and not args.force:
+                        baselines = [upstream]
+                    else:
+                        baselines = []
                     self.swap_down(args, baselines)
 
     def swap_down(self, args, baselines: List[Sha]) -> None:

@@ -156,6 +156,10 @@ class Queue:
             with open(self.queuefile_path, "r") as f:
                 self.qf = yaml.load(f, Loader=Loader)
 
+    @classmethod
+    def is_queue(cls, git: Git) -> bool:
+        return (git.directory / cls.queuefile_name).exists()
+
     def save_queuefile(
         self,
         qf: QueueFile | None = None,
