@@ -20,7 +20,7 @@ from .continuations import (
 from . import continuations
 from .output import Output
 from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit, Sha
-from .queue import Queue
+from .queue import Queue, DETECT
 
 description = """Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history),
 while holding the final content constant.
@@ -342,7 +342,7 @@ class Main(continuations.Main):
                     self.swap_up(args)
                 else:
                     if Queue.is_queue(self.git):
-                        baselines = list(Queue(self.git).baselines_for_swap())
+                        baselines = list(Queue(self.git, bare=DETECT).baselines_for_swap())
                     elif upstream and not args.force:
                         baselines = [upstream]
                     else:

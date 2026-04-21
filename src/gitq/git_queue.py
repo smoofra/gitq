@@ -4,7 +4,7 @@ import argparse
 import yaml
 
 from .git import Git
-from .queue import QueueFile, Baseline, Queue, Loader, Dumper
+from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT
 from .continuations import Abort, UserError, Heading
 from . import continuations
 
@@ -63,6 +63,7 @@ class Main(continuations.Main):
         )
         init_parser.add_argument("baselines", action="extend", nargs="+", metavar="BASELINE")
         init_parser.add_argument("--title")
+        init_parser.add_argument("--bare", action="store_true")
         init_parser.add_argument("--branch", "-b", help="make a new branch")
 
         add_parser = subs.add_parser(
@@ -71,11 +72,19 @@ class Main(continuations.Main):
             description="Add baselines and rebase.",
         )
         add_parser.add_argument("add", action="extend", nargs="+", metavar="BASELINE")
+        add_parser.add_argument(
+            "--bare", action="store_true", help="convert to bare branch", default=None
+        )
+        add_parser.add_argument("--no-bare", action="store_false", dest="bare")
 
         remove_parser = subs.add_parser(
             "remove", help="remove a baseline", description="Remove baselines and rebase."
         )
         remove_parser.add_argument("remove", action="extend", nargs="+", metavar="BASELINE")
+        remove_parser.add_argument(
+            "--bare", action="store_true", help="convert to bare branch", default=None
+        )
+        remove_parser.add_argument("--no-bare", action="store_false", dest="bare")
 
         rebase_parser = subs.add_parser(
             "rebase",
@@ -85,6 +94,10 @@ class Main(continuations.Main):
         )
         rebase_parser.add_argument("--add", metavar="BASELINE", action="append", default=[])
         rebase_parser.add_argument("--remove", metavar="BASELINE", action="append", default=[])
+        rebase_parser.add_argument(
+            "--bare", action="store_true", help="convert to bare branch", default=None
+        )
+        rebase_parser.add_argument("--no-bare", action="store_false", dest="bare")
 
         subs.add_parser(
             "tidy", help="normalize .git-queue file", description="Normalize .git-queue file."
@@ -132,15 +145,15 @@ class Main(continuations.Main):
         if args.command == "tidy":
             if queuefile.exists():
                 with open(queuefile, "r") as f:
-                    q = yaml.load(f, Loader=Loader)
+                    qf = yaml.load(f, Loader=Loader)
                 with open(queuefile, "w") as f:
-                    yaml.dump(q, f, Dumper=Dumper)
+                    yaml.dump(qf, f, Dumper=Dumper)
             return
 
         if args.command == "commit":
             if not self.git.is_clean():
                 raise UserError("Error: repo not clean")
-            q = Queue(self.git)
+            q = Queue(self.git, bare=DETECT)
             with Heading("Committing changes to queue"):
                 if args.branch:
                     q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
@@ -152,16 +165,16 @@ class Main(continuations.Main):
 
             if args.command == "init":
                 baselines = [parse_baseline(ref, git=self.git) for ref in args.baselines]
-                q = QueueFile(baselines=list(baselines), title=args.title)
-                queue = Queue(self.git, qf=q)
-                if args.branch:
-                    queue.init_new_branch(args.branch)
+                qf = QueueFile(baselines=list(baselines), title=args.title)
+                if args.bare:
+                    q = Queue(self.git, qf=qf, bare=args.branch)
                 else:
-                    queue.init()
+                    q = Queue(self.git, qf=qf, bare=None)
+                q.init(branch=args.branch)
 
             if args.command in ("rebase", "add", "remove"):
-                queue = Queue(self.git)
-                onto = list(queue.qf.baselines)
+                q = Queue(self.git, bare=DETECT)
+                onto = list(q.qf.baselines)
 
                 for baseline in getattr(args, "add", ()):
                     onto.append(parse_baseline(baseline, git=self.git))
@@ -178,7 +191,7 @@ class Main(continuations.Main):
                         raise UserError(f"{ref} not found in baselines")
                     del onto[i]
 
-                queue.rebase(onto=onto)
+                q.rebase(onto=onto, to_bare=args.bare)
 
 
 main = Main()

@@ -12,7 +12,7 @@ import pytest
 
 from gitq.output import Output
 from gitq.git import Git as BaseGit
-from gitq.git_queue import Queue
+from gitq.git_queue import Queue, DETECT
 
 __all__ = ["Git", "repo"]
 
@@ -88,7 +88,7 @@ class Git(Directory, BaseGit):
 
     @property
     def q(self):
-        return Queue(self).qf
+        return Queue(self, bare=DETECT).qf
 
     def c(self, message: str, *, filename: str | None = None, content: str | None = None):
         if filename is None:

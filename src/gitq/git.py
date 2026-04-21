@@ -74,6 +74,11 @@ class Sha(str):
         return super().__new__(cls, value)
 
 
+Ref = str  # fully qualified ref name
+
+Branch = str  # branch name WITHOUT refs/heads/ prefix
+
+
 class Commit(object):
 
     parents: List[Sha]
@@ -218,13 +223,13 @@ class Git:
                 return None
             raise
 
-    def head(self) -> str:
+    def head(self) -> Ref | Sha:
         try:
             return self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True, stderr=FNULL).strip()
         except GitFailed:
             return self.rev_parse("HEAD")
 
-    def branch(self) -> str | None:
+    def branch(self) -> Branch | None:
         head = self.head()
         if head.startswith("refs/heads/"):
             return head.removeprefix("refs/heads/")

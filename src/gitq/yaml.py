@@ -49,7 +49,7 @@ class YAMLObject(yaml.YAMLObject, metaclass=YAMLObjectMetaclass):
                 if f.name in excluded:
                     continue
                 value = getattr(data, f.name)
-                if value is None:
+                if value is None and f.default is None:
                     continue
                 yield (dumper.represent_data(f.name), represent_value(value, dumper))
 

@@ -7,7 +7,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 
 from .output import Output
-from .git import Git, UserError, GitFailed, contextGit, Commit, Sha
+from .git import Git, UserError, GitFailed, contextGit, Commit, Sha, Ref, Branch
 from .yaml import YAMLObject, BaseLoader
 
 
@@ -240,7 +240,7 @@ class Finally(Continuation):
         pass
 
     @contextmanager
-    def impl(self) -> Iterator[None]:
+    def impl(self) -> Iterator:
         try:
             yield
         except GeneratorExit:
@@ -309,7 +309,7 @@ def CheckoutBaseline(sha: Sha | None):
 
 
 @dataclass
-class EditBranch(Continuation[str]):
+class EditBranch(Continuation[Ref | Sha]):
     """
     Detach from the current branch, so it can be edited without polluting
     the reflog with a bunch of intermediate steps.   At the end, update the
@@ -317,7 +317,7 @@ class EditBranch(Continuation[str]):
     """
 
     message: str
-    head: str | None = field(default=None)
+    head: Ref | Sha | None = field(default=None)
 
     @property
     def branch(self) -> Optional[str]:
@@ -343,31 +343,33 @@ class EditBranch(Continuation[str]):
 
 
 @dataclass
-class CheckoutBranch(Finally):
+class CheckoutBranch(Finally, Continuation[Branch]):
     "Temporarily checkout ref, then restore to previous HEAD"
 
-    branch: str
-    old_branch: str | None = field(default=None)
+    ref: Ref
+    old_ref: Ref | None = field(default=None)
     orphan: bool = field(default=False)
 
     def cleanup(self):
-        if self.old_branch is not None:
-            self.git.force_checkout(self.old_branch, comment="restore previous HEAD")
+        if self.old_ref is not None:
+            if (branch := self.old_ref.removeprefix("refs/heads/")) != self.ref:
+                self.git.force_checkout(branch, comment="restore previous branch")
+            else:
+                self.git.force_checkout(self.old_ref, comment="restore previous HEAD")
 
     @contextmanager
-    def impl(self) -> Iterator:
-        assert self.branch.startswith("refs/heads/")
-        if self.old_branch is None:
-            self.old_branch = self.git.head()
-            if self.old_branch.startswith("refs/heads/"):
-                self.old_branch = self.old_branch.removeprefix("refs/heads/")
+    def impl(self) -> Iterator[Branch]:
+        branch = self.ref.removeprefix("refs/heads/")
+        assert branch != self.ref
+        if self.old_ref is None:
+            self.old_ref = self.git.head()
             self.git.checkout(
-                self.branch.removeprefix("refs/heads/"),
+                branch,
                 comment="checkout branch",
                 orphan=self.orphan,
             )
         with super().impl():
-            yield
+            yield branch
 
 
 @dataclass

@@ -84,11 +84,6 @@ part of the queue.   Baselines may be added, removed, or refreshed. Commits
 in the old baselines may be left behind, but the patches in the queue are
 carried forward.
 
-A queue is a branch with `.git-queue` file at the root.  Baselines are
-recorded in the `.git-queue` file.  It specifies the shas of the current
-baseline as well as the branch names they came from.  This information is
-used to rebase the queue.
-
 If there are more than one baselines, then the queue's patches will sit on
 merge commits brining them together.
 
@@ -100,24 +95,46 @@ if they can still resolve conflicts in the baselines.   If not, the user
 will need to prepare new ones.   If the baselines no longer conflict, user
 merges may be left behind during a rebase.
 
+### Queue Metadata
+
+A queue is a branch with a `.git-queue` file at the root, or a *bare branch*
+where the metadata is stored in git config (`branch.<name>.git-queue`) instead.
+Baselines are recorded in the queue metadata.  They specify the shas of the
+current baseline as well as the branch names they came from.  This information
+is used to rebase the queue.
+
+Storing metadata in a `.git-queue` file means it travels with the branch —
+push and pull work normally, and anyone who clones or fetches the branch has
+everything they need to rebase it.
+
+Bare branches keep the commit history clean — no baseline commits and no
+`.git-queue` file appear in the branch, so the history looks exactly like an
+ordinary topic branch.  The tradeoff is that the metadata lives only in local
+git config and is not pushed to remotes.
+
+Create a bare queue with `git queue init --bare`, or convert an existing
+queue with `git queue rebase --bare` / `git queue rebase --no-bare`.
+
 
 ```
 git queue SUBCOMMAND [OPTIONS]
 ```
 
-### `git queue init BASELINE...`
+### `git queue init [--bare] BASELINE...`
 
-Initialize a queue Each BASELINE is a branch,tag, or commit.
+Initialize a queue.  Each BASELINE is a branch, tag, or commit.  `--bare`
+stores metadata in git config instead of a `.git-queue` file.
 
-### `git queue rebase`
+### `git queue rebase [--bare | --no-bare]`
 
 Rebase the queue onto its baselines, incorporating any upstream changes.
+`--bare` converts to a bare branch; `--no-bare` converts back to a `.git-queue` file.
 
-### `git queue add BASELINE...`
+### `git queue add [--bare | --no-bare] BASELINE...`
 
 Add one or more baselines and rebase.
 
-### `git queue remove BASELINE...`
+### `git queue remove [--bare | --no-bare] BASELINE...`
 
 Remove one or more baselines and rebase.
 

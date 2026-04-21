@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, replace
-from typing import List, Iterator
+from typing import List, Iterator, ContextManager
 from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
@@ -12,7 +12,7 @@ import re
 import yaml
 
 from .output import Output
-from .git import Git, Commit, GitFailed, UserError, contextGit, Sha
+from .git import Git, Commit, GitFailed, UserError, contextGit, Sha, Ref, Branch
 from .continuations import (
     EditBranch,
     PickCherries,
@@ -26,6 +26,15 @@ from .continuations import (
     Heading,
 )
 from .yaml import YAMLObject, BaseLoader
+
+
+class Detect:
+    "A sentinel value"
+
+    pass
+
+
+DETECT = Detect()
 
 
 class Loader(BaseLoader):
@@ -139,26 +148,84 @@ class Queue:
 
     git: Git
     qf: QueueFile
+    bare: Branch | None
+
+    def __init__(self, git: Git, *, qf: QueueFile | None = None, bare: Branch | None | Detect):
+        self.git = git
+        if qf:
+            assert not isinstance(bare, Detect)
+            self.qf = qf
+            self.bare = bare
+            return
+        if isinstance(bare, Detect):
+            assert qf is None
+            if branch := self.git.branch():
+                try:
+                    self.qf = self.read_qf_from_config(branch, git=git)
+                    self.bare = branch
+                    return
+                except GitFailed:
+                    pass
+            bare = None
+        if bare is not None:
+            self.qf = self.read_qf_from_config(bare, git=git)
+            self.bare = bare
+            return
+        elif self.queuefile_path.exists():
+            self.bare = None
+            with open(self.queuefile_path, "r") as f:
+                self.qf = yaml.load(f, Loader=Loader)
+            return
+        raise Exception("This branch is not a queue.")
 
     queuefile_name = ".git-queue"
+
+    @property
+    def qf_config_name(self):
+        assert self.bare
+        return self.qf_config_name_for(self.bare)
+
+    @staticmethod
+    def qf_config_name_for(branch: Branch):
+        assert branch
+        return f"branch.{branch}.git-queue"
+
+    def historiography_config_name(self, branch: Branch):
+        return f"branch.{branch}.gitq-historiography"
 
     @property
     def queuefile_path(self) -> Path:
         return self.git.directory / self.queuefile_name
 
-    def __init__(self, git: Git, *, qf: QueueFile | None = None):
-        self.git = git
-        if qf:
-            self.qf = qf
-        else:
-            if not self.queuefile_path.exists():
-                raise NotAQueue("This branch is not a queue.")
-            with open(self.queuefile_path, "r") as f:
-                self.qf = yaml.load(f, Loader=Loader)
+    @classmethod
+    def read_qf_from_config(cls, branch: Branch, *, git: Git):
+        y = git("config", "get", cls.qf_config_name_for(branch), quiet=True)
+        return yaml.load(StringIO(y), Loader=Loader)
 
     @classmethod
     def is_queue(cls, git: Git) -> bool:
+        "check if HEAD is a queue"
+        if branch := git.branch():
+            try:
+                cls.read_qf_from_config(branch, git=git)
+                return True
+            except GitFailed:
+                pass
         return (git.directory / cls.queuefile_name).exists()
+
+    @classmethod
+    def qf_for_ref(cls, ref: Ref, *, git: Git) -> QueueFile | None:
+        if (branch := ref.removeprefix("refs/heads/")) != ref:
+            try:
+                return cls.read_qf_from_config(branch, git=git)
+            except GitFailed:
+                pass
+        try:
+            content = git("show", f"{ref}:{cls.queuefile_name}", quiet=True)
+            return yaml.load(StringIO(content), Loader=Loader)
+        except GitFailed:
+            pass
+        return None
 
     def save_queuefile(
         self,
@@ -170,26 +237,42 @@ class Queue:
     ):
         if qf is None:
             qf = self.qf
-        assert amend + (stage is not None) + bool(commit_message) == 1
-        with open(self.queuefile_path, "w") as f:
-            yaml.dump(qf, f, Dumper=Dumper)
-        if stage or amend or commit_message:
-            self.git("add", self.queuefile_path.relative_to(self.git.directory))
-        if amend:
-            self.git("commit", "--amend", "--allow-empty", "-C", "HEAD")
-        elif commit_message:
+        assert amend + (stage is not None) + bool(commit_message) == 1 or (
+            self.bare and not commit_message
+        )
+        if self.bare:
+            with StringIO() as f:
+                yaml.dump(qf, f, Dumper=Dumper)
+                y = f.getvalue()
+            self.git("config", "set", self.qf_config_name, y, quiet=True)
+        else:
+            with open(self.queuefile_path, "w") as f:
+                yaml.dump(qf, f, Dumper=Dumper)
+            if stage or amend or commit_message:
+                self.git("add", self.queuefile_path.relative_to(self.git.directory))
+            if amend:
+                self.git("commit", "--amend", "--allow-empty", "-C", "HEAD")
+        if commit_message:
             self.git("commit", "--allow-empty", "-m", commit_message)
 
-    def init(self):
-        if self.is_historiography:
-            raise UserError("This is a historiography.  Cannot init.")
-        self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
-        self.save_queuefile(amend=True)
-
-    def init_new_branch(self, branch: str):
-        self.git.detach()
-        self.save_queuefile(commit_message="new queue branch")
-        progn(MergeBaselines(self.qf), NewBranch(branch))
+    def init(self, *, branch: str = ""):
+        if branch:
+            self.git.detach()
+            if self.bare:
+                self.save_queuefile()
+            else:
+                self.save_queuefile(commit_message="new queue branch")
+            progn(
+                MergeBaselines(old_baselines=self.qf.baselines, qf=self.qf, bare=self.bare),
+                NewBranch(branch),
+            )
+        else:
+            if self.is_queue(self.git):
+                raise UserError("Already a queue, cannot init.")
+            self.save_queuefile(stage=True)
+            if self.bare:
+                return
+            self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
 
     @staticmethod
     def find_user_merges(commits: List[Commit]) -> Iterator[Commit]:
@@ -211,31 +294,34 @@ class Queue:
             if c.is_merge and c.sha in baseline_shas and not is_merged_baseline(c):
                 yield c
 
-    def find_patches(self, ref: str, baselines: List[Baseline], new_base: str) -> Iterator[Commit]:
-        if self.git.on_orphan_branch():
+    @classmethod
+    def find_patches(
+        cls, ref: str, baselines: List[Baseline], new_base: str, *, git: Git
+    ) -> Iterator[Commit]:
+        if git.on_orphan_branch():
             return
-        commits = self.git.commits(*(f"^{b.sha}" for b in baselines), ref, reverse=True)
-        user_merges = {c.sha for c in self.find_user_merges(list(reversed(commits)))}
-        base = self.find_git_cherry_limit(commits)
+        commits = git.commits(*(f"^{b.sha}" for b in baselines), ref, reverse=True)
+        user_merges = {c.sha for c in cls.find_user_merges(list(reversed(commits)))}
+        base = cls.find_git_cherry_limit(commits, git=git)
         # We use the + side instead of the - side of the `git cherry`
         # output to detect duplicates, because if we used the - side, then
         # it would only filter out distinct (different sha) commits that
         # are duplicated, but it does not filter out commits that are
         # literally present (same sha) in both branch and new_base.
-        new = set(r.sha for r in self.git.find_duplicates(base, ref, new_base) if r.is_new)
+        new = set(r.sha for r in git.find_duplicates(base, ref, new_base) if r.is_new)
         for commit in commits:
             if commit.sha in user_merges:
                 continue
             if from_this_tool(commit):
                 continue
             if commit.is_merge:
-                if self.git.is_conflicted(commit):
+                if git.is_conflicted(commit):
                     raise UserError(f"rebasing merges is not implemented yet: {commit.summary}")
                 continue
             if commit.sha not in new:
                 continue
-            changed = self.git("show", "--name-only", "--pretty=", commit.sha, quiet=True).strip()
-            if changed == self.queuefile_name:
+            changed = git("show", "--name-only", "--pretty=", commit.sha, quiet=True).strip()
+            if changed == cls.queuefile_name:
                 continue
             yield commit
 
@@ -248,13 +334,14 @@ class Queue:
             if from_this_tool(commit):
                 yield commit.sha
 
-    def find_git_cherry_limit(self, commits: List[Commit]) -> str | None:
+    @classmethod
+    def find_git_cherry_limit(cls, commits: List[Commit], git: Git) -> str | None:
         "Find the 'baseline' or 'merged baselines' commit in the queue"
         merges = [c.sha for c in commits if is_merged_baseline(c)]
         if len(merges) == 0:
             # See below, just pick some limit.  Can't return them all
             return commits[0].parents[0] if commits[0].parents else None
-        bases = self.git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
+        bases = git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
         # This is only used to provide a limit to `git cherry`.   If there
         # are multiple baselines, then `git cherry` may produce additional
         # output for baseline commits that should have been excluded.   But
@@ -266,33 +353,32 @@ class Queue:
         # that as the limit.
         return bases[0]
 
-    def rebase(self, onto: List[Baseline] | None = None) -> None:
+    def rebase(self, onto: List[Baseline] | None, to_bare: bool) -> None:
         if self.is_historiography:
             raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
-            Rebase(onto).run()
+            Rebase(onto=onto, bare=self.bare, to_bare=to_bare).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
     # tracking it, detect that.
 
     @classmethod
-    def needs_rebase(cls, ref: str | None, seen: frozenset[str] = frozenset()) -> bool:
+    def needs_rebase(
+        cls, ref: Ref | None, seen: frozenset[str] = frozenset(), *, git: Git
+    ) -> bool:
         "Return True if the local queue branch at ref has baselines that have been updated."
         if ref is None or not ref.startswith("refs/heads/"):
             return False
         if ref in seen:
             return False
-        git = contextGit.get()
-        try:
-            content = git("show", f"{ref}:{cls.queuefile_name}", quiet=True)
-        except GitFailed:
+        qf = cls.qf_for_ref(ref, git=git)
+        if qf is None:
             return False
-        qf = yaml.load(StringIO(content), Loader=Loader)
         seen = seen | {ref}
         for b in qf.baselines:
             if refresh_baseline(b, git=git).sha != b.sha:
                 return True
-            if cls.needs_rebase(b.ref, seen):
+            if cls.needs_rebase(b.ref, seen, git=git):
                 return True
         return False
 
@@ -315,15 +401,14 @@ class Queue:
         branch = self.git.branch()
         if branch is None:
             raise UserError("HEAD is not a branch")
+        config_name = self.historiography_config_name(branch)
         try:
-            cfg = self.git("config", f"branch.{branch}.gitq.historiography", quiet=True).strip()
+            cfg = self.git("config", config_name, quiet=True).strip()
             if not cfg.startswith("refs/heads/"):
                 raise Exception(f"Not a branch: {cfg}")
             return cfg
         except GitFailed as e:
-            raise UserError(
-                f"Commit to where?  Set config branch.{branch}.gitq.historiography"
-            ) from e
+            raise UserError(f"Commit to where?  Set config {config_name}") from e
 
     def commit(self, *, message: str = "", meta_branch: str):
         sha = self.git.rev_parse("HEAD")
@@ -338,7 +423,7 @@ class Queue:
             tree = Sha(self.git("write-tree").strip())
 
             with Heading("Checking round-trip"):
-                if Queue(self.git, qf=qf).recreate_queue(check_clean=False) != sha:
+                if Queue(self.git, qf=qf, bare=None).recreate_queue(check_clean=False) != sha:
                     raise Exception("re-created queue does not match original")
 
         with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
@@ -409,11 +494,38 @@ class Queue:
 class RebaseBranch(Step):
     "Temporarily checkout a the specified branch and rebase it."
 
-    ref: str
+    ref: Ref
 
     def run(self):
         with Output.heading(f"rebasing branch {self.ref}"), CheckoutBranch(self.ref):
-            Rebase().run()
+            q = Queue(self.git, bare=DETECT)
+            Rebase(bare=q.bare, to_bare=None).run()
+
+
+@contextmanager
+def nop_context():
+    yield
+
+
+@dataclass
+class RestoreConfig(Continuation):
+
+    qf: QueueFile
+    branch: Branch
+
+    @classmethod
+    def from_q(cls, q: Queue) -> ContextManager:
+        if q.bare:
+            return cls(q.qf, q.bare)
+        return nop_context()
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        try:
+            yield
+        except (Exception, Resume):
+            Queue(self.git, qf=self.qf, bare=self.branch).save_queuefile()
+            raise
 
 
 @dataclass
@@ -421,30 +533,42 @@ class RebaseOne(Step):
     "Rebase a single branch (not recursive)."
 
     onto: List[Baseline] | None
+    bare: Branch | None
+    to_bare: bool | None
 
     def run(self):
-        q = Queue(self.git)
+        old_q = Queue(self.git, bare=self.bare)
+        q = Queue(self.git, bare=self.bare)
 
-        old_baselines = q.qf.baselines
         if self.onto is None:
             self.onto = q.qf.baselines
-
-        # FIXME these should not be re-refreshed every time this resumes
         q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
-        with EditBranch(message="git-queue rebase") as branch:
-            progn(MergeBaselines(q.qf), FindAndPickCherries(branch, old_baselines))
+
+        if self.to_bare and (branch := self.git.branch()):
+            q.bare = branch
+            q.save_queuefile()
+        if self.to_bare is False:
+            if q.bare:
+                self.git("config", "unset", q.qf_config_name)
+            q.bare = None
+
+        with RestoreConfig.from_q(old_q), EditBranch(message="git-queue rebase") as head:
+            progn(
+                MergeBaselines(old_baselines=old_q.qf.baselines, qf=q.qf, bare=q.bare),
+                FindAndPickCherries(head, old_q.qf.baselines, self.bare),
+            )
 
 
 @dataclass
 class FindAndPickCherries(Step):
-    "Find patches in branch, and thn apply them to HEAD"
+    "Find patches in head, and then apply them to HEAD"
 
-    branch: str
+    head: Ref | Sha
     old_baselines: List[Baseline]
+    bare: Branch | None
 
     def run(self) -> None:
-        q = Queue(self.git)
-        patches = list(q.find_patches(self.branch, self.old_baselines, "HEAD"))
+        patches = list(Queue.find_patches(self.head, self.old_baselines, "HEAD", git=self.git))
         with PickCherries(cherries=[b.sha for b in patches], edit=True):
             pass
 
@@ -466,18 +590,20 @@ class Rebase(Step):
       * Then rebase the current branch
     """
 
+    bare: Branch | None
+    to_bare: bool | None
     onto: None | List[Baseline] = field(default=None)
 
     def run(self) -> None:
         steps: List[Step] = list()
 
-        q = Queue(self.git)
-        for b in q.qf.baselines:
-            if q.needs_rebase(b.ref):
-                assert b.ref
-                steps.append(RebaseBranch(b.ref))
+        q = Queue(self.git, bare=self.bare)
+        for baseline in q.qf.baselines:
+            if q.needs_rebase(baseline.ref, git=self.git):
+                assert baseline.ref
+                steps.append(RebaseBranch(baseline.ref))
 
-        steps.append(RebaseOne(onto=self.onto))
+        steps.append(RebaseOne(onto=self.onto, bare=self.bare, to_bare=self.to_bare))
 
         with Then(steps=steps):
             pass
@@ -518,7 +644,9 @@ class MergeContinue(Continuation):
 @dataclass
 class MergeBaselines(Step, Continuation):
 
+    old_baselines: List[Baseline]
     qf: QueueFile
+    bare: Branch | None
     user_merges: List[Sha] = field(default_factory=list)
     find_user_merges: bool = True
     needs_checkout: bool = True
@@ -544,7 +672,7 @@ class MergeBaselines(Step, Continuation):
 
     @cached_property
     def q(self):
-        return Queue(self.git, qf=self.qf)
+        return Queue(self.git, qf=self.qf, bare=self.bare)
 
     def still_needed(self) -> Iterator[Baseline]:
         "return a list of baselines that have not yet been merged"
@@ -567,8 +695,8 @@ class MergeBaselines(Step, Continuation):
         self.find_user_merges = False
 
         # Find user merges in HEAD
-        q = Queue(self.git)  # This is the OLD queue, before baselines have been updated
-        commits = self.git.commits("HEAD", *(f"^{b.sha}" for b in q.qf.baselines))
+        # This is the OLD queue, before baselines have been updated
+        commits = self.git.commits("HEAD", *(f"^{b.sha}" for b in self.old_baselines))
         self.user_merges.extend(c.sha for c in Queue.find_user_merges(commits))
 
         # Check that they're clean, using the NEW queue
@@ -608,7 +736,8 @@ class MergeBaselines(Step, Continuation):
 
         needed = list(self.still_needed())
         if not needed:
-            q.save_queuefile(commit_message=message("baseline", q.qf.title))
+            if not q.bare:
+                q.save_queuefile(commit_message=message("baseline", q.qf.title))
             return
 
         # try octopus merge first

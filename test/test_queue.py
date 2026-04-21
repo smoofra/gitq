@@ -100,7 +100,7 @@ def test_commit(repo: Git):
     repo.s("git checkout -q q")
     repo.s("git queue add base2")
 
-    repo.s("git config set branch.q.gitq.historiography refs/heads/mq")
+    repo.s("git config set branch.q.gitq-historiography refs/heads/mq")
     repo.s("git queue commit -m 2")
 
     changed = {
