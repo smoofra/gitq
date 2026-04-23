@@ -98,6 +98,13 @@ class Main(continuations.Main):
             "--bare", action="store_true", help="convert to bare branch", default=None
         )
         rebase_parser.add_argument("--no-bare", action="store_false", dest="bare")
+        rebase_parser.add_argument(
+            "--no-refresh",
+            action="store_false",
+            help="do not refresh baselines",
+            dest="refresh",
+            default=True,
+        )
 
         subs.add_parser(
             "tidy", help="normalize .git-queue file", description="Normalize .git-queue file."
@@ -246,7 +253,7 @@ class Main(continuations.Main):
                         raise UserError(f"{ref} not found in baselines")
                     del onto[i]
 
-                q.rebase(onto=onto, to_bare=args.bare)
+                q.rebase(onto=onto, to_bare=args.bare, refresh=getattr(args, "refresh", True))
 
 
 main = Main()

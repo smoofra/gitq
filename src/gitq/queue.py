@@ -348,11 +348,11 @@ class Queue:
         # that as the limit.
         return bases[0]
 
-    def rebase(self, onto: List[Baseline] | None, to_bare: bool) -> None:
+    def rebase(self, onto: List[Baseline] | None, to_bare: bool, refresh: bool = True) -> None:
         if self.is_historiography:
             raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
-            Rebase(onto=onto, bare=self.bare, to_bare=to_bare).run()
+            Rebase(onto=onto, bare=self.bare, to_bare=to_bare, refresh=refresh).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
     # tracking it, detect that.
@@ -558,6 +558,7 @@ class RebaseOne(Step):
     onto: List[Baseline] | None
     bare: Branch | None
     to_bare: bool | None
+    refresh: bool = True
 
     def run(self):
         old_q = Queue(self.git, bare=self.bare)
@@ -565,7 +566,10 @@ class RebaseOne(Step):
 
         if self.onto is None:
             self.onto = q.qf.baselines
-        q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
+        if self.refresh:
+            q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
+        else:
+            q.qf.baselines = list(self.onto)
 
         if self.to_bare and (branch := self.git.branch()):
             q.bare = branch
@@ -575,11 +579,18 @@ class RebaseOne(Step):
                 self.git("config", "unset", q.qf_config_name)
             q.bare = None
 
+        old_sha = self.git.rev_parse("HEAD") if not self.refresh else None
+
         with RestoreConfig.from_q(old_q), EditBranch(message="git-queue rebase") as head:
             progn(
                 MergeBaselines(old_baselines=old_q.qf.baselines, qf=q.qf, bare=q.bare),
                 FindAndPickCherries(head, old_q.qf.baselines, self.bare),
             )
+
+        if old_sha:
+            diff = self.git.cmd(["git", "diff", "--name-only", old_sha, "HEAD"]).strip()
+            if diff:
+                Output.print(f"Warning: content changed!\n{diff}\n")
 
 
 @dataclass
@@ -616,17 +627,21 @@ class Rebase(Step):
     bare: Branch | None
     to_bare: bool | None
     onto: None | List[Baseline] = field(default=None)
+    refresh: bool = True
 
     def run(self) -> None:
         steps: List[Step] = list()
 
         q = Queue(self.git, bare=self.bare)
-        for baseline in q.qf.baselines:
-            if q.needs_rebase(baseline.ref, git=self.git):
-                assert baseline.ref
-                steps.append(RebaseBranch(baseline.ref))
+        if self.refresh:
+            for baseline in q.qf.baselines:
+                if q.needs_rebase(baseline.ref, git=self.git):
+                    assert baseline.ref
+                    steps.append(RebaseBranch(baseline.ref))
 
-        steps.append(RebaseOne(onto=self.onto, bare=self.bare, to_bare=self.to_bare))
+        steps.append(
+            RebaseOne(onto=self.onto, bare=self.bare, to_bare=self.to_bare, refresh=self.refresh)
+        )
 
         with Then(steps=steps):
             pass

@@ -28,6 +28,31 @@ def test_rebase(repo: Git):
     assert [b.sha for b in repo.q.baselines] == [base1]
 
 
+def test_no_refresh(repo: Git):
+    "--no-refresh rebases without updating baseline SHAs or incorporating upstream changes"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    base0 = repo.rev_parse("HEAD")
+
+    repo.c("b")
+    repo.s("git queue init base")
+
+    repo.s("git checkout -q base")
+    repo.w("a", "A")
+    repo.s("git commit -qa --amend -m A")
+
+    repo.s("git checkout -q master")
+    assert [b.sha for b in repo.q.baselines] == [base0]
+
+    sha = repo.rev_parse("HEAD")
+    repo.s("git queue rebase --no-refresh")
+    # Baseline SHA stays at the old value — upstream changes are not incorporated
+    assert [b.sha for b in repo.q.baselines] == [base0]
+    assert repo.log() == ["a", "baseline", "b"]
+    assert repo.rev_parse("HEAD") != sha
+    repo.s(f"git diff --name-only {sha}")
+
+
 def test_two_baselines(repo: Git):
 
     repo.s("git commit --allow-empty -m0")
