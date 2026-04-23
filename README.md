@@ -194,6 +194,9 @@ patch file.   This means that the patch files recorded in a historiography
 have enough information to reconstruct the exact original commit shas that
 they were created from.
 
+### `git queue edit`
+
+Check out a queue branch associated with the current historiography branch.
 
 ## `git-swap`
 

@@ -122,6 +122,15 @@ class Main(continuations.Main):
             description="Abort a suspended operation and restore previous state.",
         )
 
+        edit_parser = subs.add_parser(
+            "edit",
+            help="edit HEAD (a historiography), by checking out a queue branch.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Edit HEAD by creating or checking out the queue branch\n"
+            "associated with it.  HEAD should be a historiography branch.",
+        )
+        edit_parser.add_argument("--branch", "-b", help="branch name")
+
         commit_parser = subs.add_parser(
             "commit", help="commit changes to queue to a historiography"
         )
@@ -164,9 +173,41 @@ class Main(continuations.Main):
             q = Queue(self.git, bare=DETECT)
             with Heading("Committing changes to queue"):
                 if args.branch:
+                    if branch := self.git.branch():
+                        meta_branch = Queue.get_historiography_branch(branch, git=self.git)
+                        if meta_branch is None:
+                            Queue.set_historiography_branch(branch, args.branch, git=self.git)
                     q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
                 else:
                     q.commit(message=args.message, meta_branch=q.historiography_branch())
+            return
+
+        if args.command == "edit":
+            if not self.git.is_clean():
+                raise UserError("Error: repo not clean")
+            q = Queue(self.git, bare=None)
+            if not q.is_historiography:
+                raise UserError("HEAD is not a historiography branch")
+            current_branch = self.git.branch()
+            if current_branch is None:
+                raise UserError("HEAD is not on a branch")
+            if args.branch:
+                queue_branch = args.branch
+            else:
+                queue_branch = Queue.find_queue_branch(current_branch, git=self.git)
+                if queue_branch is None:
+                    raise UserError(
+                        f"No queue branch found for {current_branch}. "
+                        f"Use --branch to specify one."
+                    )
+            sha = q.recreate_queue()
+            if self.git.branch_exists(queue_branch):
+                if self.git.rev_parse("refs/heads/" + queue_branch) != sha:
+                    raise UserError(f"{queue_branch} has diverged from {current_branch}")
+            else:
+                self.git.cmd(["git", "update-ref", f"refs/heads/{queue_branch}", sha])
+                Queue.set_historiography_branch(of=queue_branch, to=current_branch, git=self.git)
+            self.git.checkout(queue_branch, comment=f"checking out queue branch {queue_branch}")
             return
 
         with self.setup():

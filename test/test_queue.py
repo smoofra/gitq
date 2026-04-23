@@ -124,3 +124,55 @@ def test_commit(repo: Git):
         "patches/1-a.patch",
         "patches/2-b.patch",
     }
+
+
+def test_edit(repo: Git):
+    repo.c("0")
+    repo.s("git branch -m base")
+    repo.s("git checkout -q -b q")
+    repo.c("a")
+    repo.c("b")
+    repo.s("git queue init base")
+    repo.s("git queue rebase")
+
+    q_sha = repo.rev_parse("HEAD")
+
+    repo.s("git queue commit -m 1 -b mq")
+
+    # edit with explicit --branch finds queue branch `q`
+    repo.s("git checkout -q mq")
+    repo.s("git queue edit")
+    assert repo.branch() == "q"
+    assert repo.rev_parse("HEAD") == q_sha
+    assert repo("config", "branch.q.gitq-historiography").strip() == "refs/heads/mq"
+
+    # edit with explicit --branch creates the queue branch and links config
+    repo.s("git checkout -q mq")
+    repo.s("git branch -D q")
+    repo.s("git queue edit -b q2")
+    assert repo.branch() == "q2"
+    assert repo.rev_parse("HEAD") == q_sha
+    assert repo("config", "branch.q2.gitq-historiography").strip() == "refs/heads/mq"
+
+    repo.c("c")
+    repo.s("git queue commit -m 2")
+    q_sha2 = repo.rev_parse("HEAD")
+
+    # edit without --branch finds the queue branch `q2`
+    repo.s("git checkout -q mq")
+    repo.s("git queue edit")
+    assert repo.branch() == "q2"
+    assert repo.rev_parse("HEAD") == q_sha2
+
+    # edit without --branch finds the queue branch `q2`
+    repo.s("git checkout -q mq")
+    repo.s("git branch -D q2")
+    repo.s("git queue edit", check_error="No queue branch found")
+    repo.s("git queue edit -b q3")
+    assert repo.branch() == "q3"
+    assert repo.rev_parse("HEAD") == q_sha2
+
+    repo.s("git checkout -q q3")
+    repo.c("x")
+    repo.s("git checkout -q mq")
+    repo.s("git queue edit", check_error="diverged")

@@ -182,7 +182,8 @@ class Queue:
         assert branch
         return f"branch.{branch}.git-queue"
 
-    def historiography_config_name(self, branch: Branch):
+    @staticmethod
+    def historiography_config_name(branch: Branch):
         return f"branch.{branch}.gitq-historiography"
 
     @property
@@ -391,18 +392,46 @@ class Queue:
     def is_historiography(self) -> bool:
         return self.qf.commits is not None
 
-    def historiography_branch(self) -> str:
-        branch = self.git.branch()
-        if branch is None:
-            raise UserError("HEAD is not a branch")
-        config_name = self.historiography_config_name(branch)
+    @classmethod
+    def set_historiography_branch(cls, of: Branch, to: Branch, *, git: Git):
+        config_name = cls.historiography_config_name(of)
+        git("config", "set", config_name, f"refs/heads/{to}")
+
+    @classmethod
+    def get_historiography_branch(cls, of: Branch, *, git: Git) -> Branch | None:
         try:
-            cfg = self.git("config", config_name, quiet=True).strip()
+            config_name = cls.historiography_config_name(of)
+            cfg = git("config", config_name, quiet=True).strip()
             if not cfg.startswith("refs/heads/"):
                 raise Exception(f"Not a branch: {cfg}")
             return cfg
-        except GitFailed as e:
-            raise UserError(f"Commit to where?  Set config {config_name}") from e
+        except GitFailed:
+            return None
+
+    def historiography_branch(self) -> Branch:
+        branch = self.git.branch()
+        if branch is None:
+            raise UserError("HEAD is not a branch")
+        if hb := self.get_historiography_branch(branch, git=self.git):
+            return hb
+        config_name = self.historiography_config_name(branch)
+        raise UserError(f"Commit to where?  Set config {config_name}")
+
+    @classmethod
+    def find_queue_branch(cls, branch: Branch, *, git: Git) -> Branch | None:
+        "Find the queue branch whose historiography config points to historio_ref."
+        try:
+            output = git.cmd(
+                ["git", "config", "--get-regexp", r"branch\..*\.gitq-historiography"],
+                quiet=True,
+            ).strip()
+        except GitFailed:
+            return None
+        for line in output.splitlines():
+            key, value = line.split(" ", 1)
+            if value == "refs/heads/" + branch:
+                return key.removeprefix("branch.").removesuffix(".gitq-historiography")
+        return None
 
     def commit(self, *, message: str = "", meta_branch: str):
         sha = self.git.rev_parse("HEAD")
@@ -417,7 +446,7 @@ class Queue:
             tree = Sha(self.git("write-tree").strip())
 
             with Heading("Checking round-trip"):
-                if Queue(self.git, qf=qf, bare=None).recreate_queue(check_clean=False) != sha:
+                if Queue(self.git, qf=qf, bare=None).recreate_queue() != sha:
                     raise Exception("re-created queue does not match original")
 
         with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
@@ -427,7 +456,7 @@ class Queue:
             else:
                 self.git.cmd(["git", "commit"], interactive=True)
 
-    def recreate_queue(self, check_clean: bool = True) -> Sha:
+    def recreate_queue(self) -> Sha:
         if not self.qf.commits:
             raise UserError("This is not a historiography branch")
         with NamedTemporaryFile(prefix="index") as index:

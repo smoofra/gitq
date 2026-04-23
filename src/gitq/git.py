@@ -295,7 +295,7 @@ class Git:
     def ref_exists(self, ref: str) -> bool:
         return self.cmd_test(["git", "rev-parse", "--verify", "--quiet", ref, "--"])
 
-    def branch_exists(self, branch: str) -> bool:
+    def branch_exists(self, branch: Branch) -> bool:
         return self.ref_exists(f"refs/heads/{branch}")
 
     def ls_files(self, *args) -> Iterator[str]:
