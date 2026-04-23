@@ -339,7 +339,9 @@ class Queue:
         merges = [c.sha for c in commits if is_merged_baseline(c)]
         if len(merges) == 0:
             # See below, just pick some limit.  Can't return them all
-            return commits[0].parents[0] if commits[0].parents else None
+            if commits and commits[0].parents:
+                return commits[0].parents[0]
+            return None
         bases = git("merge-base", "--independent", *merges, quiet=True).strip().splitlines()
         # This is only used to provide a limit to `git cherry`.   If there
         # are multiple baselines, then `git cherry` may produce additional

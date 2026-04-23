@@ -167,7 +167,13 @@ class Main(continuations.Main):
                 baselines = [parse_baseline(ref, git=self.git) for ref in args.baselines]
                 qf = QueueFile(baselines=list(baselines), title=args.title)
                 if args.bare:
-                    q = Queue(self.git, qf=qf, bare=args.branch)
+                    if args.branch:
+                        branch = args.branch
+                    else:
+                        branch = self.git.branch()
+                        if not branch:
+                            raise UserError("HEAD is not on a branch")
+                    q = Queue(self.git, qf=qf, bare=branch)
                 else:
                     q = Queue(self.git, qf=qf, bare=None)
                 q.init(branch=args.branch)
