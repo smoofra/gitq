@@ -2,10 +2,14 @@ import types
 import typing
 from typing import Any, Self, Type
 from dataclasses import fields, is_dataclass, Field
+from contextvars import ContextVar
 
 import yaml
 
-from .git import Sha
+from .git import Sha, Git
+
+# This should only be used to supply the .git property of serializable objects
+contextGit: ContextVar[Git] = ContextVar("git")
 
 
 class YAMLObjectMetaclass(yaml.YAMLObjectMetaclass):
@@ -54,6 +58,10 @@ class YAMLObject(yaml.YAMLObject, metaclass=YAMLObjectMetaclass):
                 yield (dumper.represent_data(f.name), represent_value(value, dumper))
 
         return yaml.MappingNode(cls.yaml_tag, list(i()))
+
+    @property
+    def git(sef) -> Git:
+        return contextGit.get()
 
 
 yaml.add_representer(

@@ -6,7 +6,7 @@ import argparse
 from . import continuations
 from .continuations import EditBranch, PickCherries, Abort
 from .git import UserError
-from .git_swap import collect_cherries, CheckoutBaseline
+from .git_swap import collect_cherries, checkout_baseline
 
 
 description = """
@@ -46,7 +46,7 @@ class Main(continuations.Main):
             cherries = collect_cherries(commit, git=self.git)
             parent = self.git.unique_parent_or_root(commit)
             with EditBranch(message="git-drop"):
-                with CheckoutBaseline(parent.sha if parent else None):
+                with checkout_baseline(parent.sha if parent else None, git=self.git):
                     with PickCherries(cherries=cherries, edit=args.edit):
                         pass
 

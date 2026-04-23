@@ -3,15 +3,13 @@ import subprocess
 import re
 from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
 from pathlib import Path
-from contextvars import ContextVar
 from contextlib import contextmanager
 from functools import cache
 
 from .output import Output
 
-FNULL = open(os.devnull, "w")
 
-contextGit: ContextVar["Git"] = ContextVar("git")
+FNULL = open(os.devnull, "w")
 
 
 class GitFailed(Exception):
@@ -110,7 +108,7 @@ class Commit(object):
 
     @property
     def abbrev(self):
-        return contextGit.get().abbrev(self.sha)
+        return self.git.abbrev(self.sha)
 
     @property
     def summary(self) -> str:

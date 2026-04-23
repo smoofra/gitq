@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from .continuations import (
     Abort,
-    CheckoutBaseline,
+    checkout_baseline,
     cherry_pick,
     Continuation,
     EditBranch,
@@ -95,7 +95,7 @@ class OrSquash(Continuation):
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
-            with CheckoutBaseline(C.sha if C else None):
+            with checkout_baseline(C.sha if C else None, git=self.git):
                 self.git.checkout_tree(A.sha)
                 self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
             if self.stop:
@@ -104,7 +104,7 @@ class OrSquash(Continuation):
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
-            with CheckoutBaseline(C.sha if C else None):
+            with checkout_baseline(C.sha if C else None, git=self.git):
                 self.git.checkout_tree(A.sha)
                 author = split_author(B.author)
                 env = dict(os.environ)
@@ -168,7 +168,7 @@ class KeepGoing(Continuation):
 
         except (SwapFailed, MergeFound, Stop):
             for cherry in self.cherries:
-                cherry_pick(self.git.commit(cherry))
+                cherry_pick(self.git.commit(cherry), git=self.git)
             return
 
 
@@ -233,10 +233,10 @@ def swap(*, git: Git, edit: bool = False, baselines: List[Sha]) -> None:
     heading = f"Attempting to swap:\n\t{one.summary}\n\t{two.summary}"
     with Heading(heading, quiet=True):
         with SwapCheckpoint(head=one.sha):
-            with CheckoutBaseline(three.sha if three else None):
+            with checkout_baseline(three.sha if three else None, git=git):
                 with PickCherryWithReference(cherry=two.sha, reference=one.sha):
                     try:
-                        cherry_pick(one, edit=edit)
+                        cherry_pick(one, edit=edit, git=git)
                     except GitFailed as e:
                         raise SwapFailed(f"Swap failed: {e}") from e
 

@@ -12,7 +12,7 @@ import re
 import yaml
 
 from .output import Output
-from .git import Git, Commit, GitFailed, UserError, contextGit, Sha, Ref, Branch
+from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch
 from .continuations import (
     EditBranch,
     PickCherries,
@@ -55,8 +55,7 @@ class Baseline(YAMLObject):
     ref: str | None = field(default=None)
     remote: str | None = field(default=None)
 
-    def _summary(self) -> tuple[str, str]:
-        git = contextGit.get()
+    def _summary(self, git: Git) -> tuple[str, str]:
         commit = git.commit(self.sha)
         if not self.remote:
             if not self.ref:
@@ -79,13 +78,13 @@ class Baseline(YAMLObject):
         return commit.abbrev, f"({self.ref} @ {remote}) {commit.title}"
 
     @property
-    def summary(self):
-        abbrev, title = self._summary()
+    def summary(self) -> str:
+        abbrev, title = self._summary(self.git)
         return f"{abbrev} {title}"
 
     @property
-    def title(self):
-        return self._summary()[1]
+    def title(self) -> str:
+        return self._summary(self.git)[1]
 
 
 @dataclass

@@ -7,8 +7,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 
 from .output import Output
-from .git import Git, UserError, GitFailed, contextGit, Commit, Sha, Ref, Branch
-from .yaml import YAMLObject, BaseLoader
+from .git import Git, UserError, GitFailed, Commit, Sha, Ref, Branch
+from .yaml import YAMLObject, BaseLoader, contextGit
 
 
 class Loader(BaseLoader):
@@ -119,10 +119,6 @@ class Continuation(Generic[T], YAMLObject):
     @abstractmethod
     def impl(self) -> ContextManager[T]:
         pass
-
-    @property
-    def git(sef) -> Git:
-        return contextGit.get()
 
     @staticmethod
     def register(c: Type[YAMLObject]) -> None:
@@ -274,11 +270,10 @@ class DeleteTempBranch(Finally):
 
 
 @contextmanager
-def TempBranch() -> Iterator[str]:
+def temp_branch(git: Git) -> Iterator[str]:
     """
     Create a temporary branch with no content and no parents.
     """
-    git = contextGit.get()
     branches = set(git.branches())
     for n in count():
         branch = f"temp-{n}"
@@ -294,14 +289,13 @@ def TempBranch() -> Iterator[str]:
 
 
 @contextmanager
-def CheckoutBaseline(sha: Sha | None):
+def checkout_baseline(sha: Sha | None, *, git: Git):
     """
     Checkout a baseline commit, or if argument is None, create a temporary
     branch with no history and check that out.
     """
-    git = contextGit.get()
     if sha is None:
-        with TempBranch():
+        with temp_branch(git):
             yield
     else:
         git.checkout(sha)
@@ -384,7 +378,7 @@ class PickCherries(Continuation):
         yield
         while self.cherries:
             cherry, *self.cherries = self.cherries
-            cherry_pick(self.git.commit(cherry), edit=self.edit)
+            cherry_pick(self.git.commit(cherry), edit=self.edit, git=self.git)
 
 
 @dataclass
@@ -410,9 +404,8 @@ class CherryPickContinue(Continuation):
             self.git.cmd(["git", "cherry-pick", "--continue"])
 
 
-def cherry_pick(cherry: Commit, *, edit: bool = False) -> None:
+def cherry_pick(cherry: Commit, *, edit: bool = False, git: Git) -> None:
     "Cherry-pick a single commit.   If it fails, suspend so the user can resolve conflicts."
-    git = contextGit.get()
     with Heading(f"Cherry picking {cherry.summary}", quiet=True):
         try:
             git.cmd(
@@ -436,10 +429,6 @@ class Step(YAMLObject):
     @abstractmethod
     def run(self):
         pass
-
-    @property
-    def git(self) -> Git:
-        return contextGit.get()
 
 
 @dataclass
