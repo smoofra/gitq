@@ -1,6 +1,17 @@
 import sys
 import yaml
-from typing import Optional, List, TypeVar, ContextManager, Generic, Iterator, NoReturn, Type
+from typing import (
+    Optional,
+    List,
+    TypeVar,
+    ContextManager,
+    Generic,
+    Iterator,
+    NoReturn,
+    Type,
+    Tuple,
+)
+from contextvars import ContextVar
 from contextlib import contextmanager
 from itertools import count
 from abc import abstractmethod
@@ -32,6 +43,7 @@ class Continuations(YAMLObject):
 
     continuations: List["Continuation"]
     tool: str
+    ok_resumes: List[str]
     continue_command: str | None = None
     status: str | None = field(default=None)
 
@@ -41,16 +53,30 @@ yaml.add_path_resolver("!Continuations", [], Loader=Loader, Dumper=Dumper)
 T = TypeVar("T")
 
 
+ok_resumes: ContextVar[Tuple[type, ...]] = ContextVar("ok_resumes", default=())
+
+
+@contextmanager
+def handles(*types: type):
+    token = ok_resumes.set(ok_resumes.get() + types)
+    try:
+        yield
+    finally:
+        ok_resumes.reset(token)
+
+
 class Suspend(BaseException):
     "Suspend execution and save a stack of continuations in .git/continuation.yaml"
 
     continuations: List["Continuation"]
     status: Optional[str]
+    ok_resumes: list[str]
 
     def __init__(self, *, status: str | None = None) -> None:
         super().__init__()
         self.status = status
         self.continuations = list()
+        self.ok_resumes = [t.__name__ for t in ok_resumes.get()]
 
 
 class Resume(BaseException):
@@ -166,7 +192,9 @@ class Main:
     def suspend(self, e: Suspend) -> NoReturn:
         with open(self.git.continuation, "w") as f:
             continuations = list(reversed(e.continuations))
-            j = Continuations(continuations, self.tool, self.continue_command, e.status)
+            j = Continuations(
+                continuations, self.tool, e.ok_resumes, self.continue_command, e.status
+            )
             yaml.dump(j, f, Dumper=Dumper)
         Output.print()
         Output.print("Suspended!")
@@ -194,10 +222,8 @@ class Main:
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
 
-        # All the commands support continue and abort, so its fine if the
-        # user calls them from the wrong tool.
-        if j.tool != self.tool and throw is not None and not isinstance(throw, Abort):
-            raise UserError(f"A {j.tool} operation is currently in progress")
+        if isinstance(throw, Resume) and type(throw).__name__ not in j.ok_resumes:
+            raise UserError("That type of resume is not allowed here")
 
         self.git.continuation.unlink()
 
@@ -381,6 +407,12 @@ class PickCherries(Continuation):
             cherry_pick(self.git.commit(cherry), edit=self.edit, git=self.git)
 
 
+class Skip(Resume):
+    """
+    Raised into a resume stack to skip the current cherry-pick and continue.
+    """
+
+
 @dataclass
 class CherryPickContinue(Continuation):
     """
@@ -393,7 +425,11 @@ class CherryPickContinue(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
-            yield
+            with handles(Skip):
+                yield
+        except Skip:
+            self.git.cherry_pick_abort()
+            return
         except (Exception, Resume):
             self.git.cherry_pick_abort()
             raise

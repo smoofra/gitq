@@ -5,7 +5,7 @@ import yaml
 
 from .git import Git
 from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT
-from .continuations import Abort, UserError, Heading
+from .continuations import Abort, UserError, Heading, Skip
 from . import continuations
 
 
@@ -112,6 +112,11 @@ class Main(continuations.Main):
             description="Continue a suspended operation.",
         )
         subs.add_parser(
+            "skip",
+            help="skip the current commit",
+            description="Skip the current commit and continue.",
+        )
+        subs.add_parser(
             "abort",
             help="abort suspend operation",
             description="Abort a suspended operation and restore previous state.",
@@ -139,6 +144,9 @@ class Main(continuations.Main):
 
         if args.command == "abort":
             self.resume(Abort())
+
+        if args.command == "skip":
+            self.resume(Skip())
 
         queuefile = self.git.directory / Queue.queuefile_name
 

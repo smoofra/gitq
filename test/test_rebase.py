@@ -141,6 +141,30 @@ def test_rebase_edited_merge(repo: Git):
     repo.s("git queue rebase | grep 'rebasing merges is not implemented yet'")
 
 
+def test_rebase_skip(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+
+    repo.c("b")
+    repo.c("c")
+
+    repo.s("git queue init base")
+
+    repo.s("git checkout -q base")
+
+    repo.c("B", filename="b")
+    base1 = repo.rev_parse("HEAD")
+
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    repo.s("git queue skip")
+
+    assert repo.log() == ["a", "B", "baseline", "c"]
+    assert [b.sha for b in repo.q.baselines] == [base1]
+
+
 @pytest.mark.parametrize("case", ["normal", "wrong_tool", "abort"])
 def test_rebase_conflict(repo: Git, case):
     repo.c("a")

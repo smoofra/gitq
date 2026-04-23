@@ -7,6 +7,7 @@ from gitq.git import Sha
 def test_yaml_round_trip():
     c = Continuations(
         continuations=[EditBranch(message="test", head="refs/heads/main")],
+        ok_resumes=[],
         tool="rebase",
         status="cherry-picking abc123",
     )
@@ -17,6 +18,7 @@ def test_yaml_round_trip():
           message: test
           head: refs/heads/main
         tool: rebase
+        ok_resumes: []
         status: cherry-picking abc123
     """
     assert serialized.strip() == dedent(y).strip()
@@ -32,6 +34,7 @@ def test_yaml_round_trip():
 def test_yaml_no_status():
     c = Continuations(
         continuations=[PickCherries(cherries=[Sha("abc"), Sha("def")], edit=False)],
+        ok_resumes=[],
         tool="split",
     )
     serialized = yaml.dump(c, Dumper=Dumper)

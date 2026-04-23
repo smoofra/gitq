@@ -163,6 +163,10 @@ Resume a suspended operation.
 
 Abort a suspended operation and restore git to its previous state.
 
+###  `git queue skip`
+
+Skip the current cherry-pick and then continue.
+
 ### `git queue status`
 
 Print the current operation status.

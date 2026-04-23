@@ -8,6 +8,7 @@ import argparse
 from dataclasses import dataclass, field
 
 from .continuations import (
+    handles,
     Abort,
     checkout_baseline,
     cherry_pick,
@@ -90,7 +91,8 @@ class OrSquash(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
-            yield
+            with handles(Fixup, Squash):
+                yield
         except Fixup:
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
@@ -124,10 +126,6 @@ class OrSquash(Continuation):
                 self.git.cmd(cmd, env=env, interactive=True)
             if self.stop:
                 raise Stop
-        except Stop:
-            raise  # handled by KeepGoing
-        except Resume:
-            raise NotImplementedError
 
 
 @dataclass
@@ -156,20 +154,21 @@ class KeepGoing(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator[None]:
-        try:
-            yield  # swap
-
-            while True:
-                A = self.git.commit("HEAD")
-                B = self.git.unique_parent(A)
-                self.cherries = [A.sha] + self.cherries
-                self.git.checkout(B.sha)
-                swap_or_squash(edit=self.edit, git=self.git, baselines=self.baselines, stop=True)
-
-        except (SwapFailed, MergeFound, Stop):
-            for cherry in self.cherries:
-                cherry_pick(self.git.commit(cherry), git=self.git)
-            return
+        with handles(Stop):
+            try:
+                yield  # swap
+                while True:
+                    A = self.git.commit("HEAD")
+                    B = self.git.unique_parent(A)
+                    self.cherries = [A.sha] + self.cherries
+                    self.git.checkout(B.sha)
+                    swap_or_squash(
+                        edit=self.edit, git=self.git, baselines=self.baselines, stop=True
+                    )
+            except (SwapFailed, MergeFound, Stop):
+                for cherry in self.cherries:
+                    cherry_pick(self.git.commit(cherry), git=self.git)
+                return
 
 
 @dataclass
@@ -180,14 +179,15 @@ class KeepGoingUp(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
-        try:
-            yield  # check out base commit
-            while self.cherries:
-                cherry, *self.cherries = self.cherries
-                self.git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", cherry])
-                swap_or_squash(git=self.git, edit=self.edit, baselines=[], stop=True)
-        except (Stop, SwapFailed):
-            pass
+        with handles(Stop):
+            try:
+                yield  # check out base commit
+                while self.cherries:
+                    cherry, *self.cherries = self.cherries
+                    self.git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", cherry])
+                    swap_or_squash(git=self.git, edit=self.edit, baselines=[], stop=True)
+            except (Stop, SwapFailed):
+                pass
         for cherry in self.cherries:
             self.git.cmd(["git", "cherry-pick", "--quiet", "--allow-empty", cherry])
 

@@ -607,6 +607,23 @@ def test_keep_going_up(repo: Git):
     assert "".join(repo.log()) == "bcdaAefg"
 
 
+def test_keep_going_up_stop(repo: Git):
+    for c in "abcd":
+        repo.c(c)
+    repo.c("A", filename="a")
+    for c in "efg":
+        repo.c(c)
+
+    assert "".join(repo.log()) == "abcdAefg"
+    sha = repo.rev_parse("HEAD")
+
+    repo.s("git swap --keep-going --up --edit :/a; [[ $? = 2 ]]")
+    repo.s("git swap --stop")
+
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert "".join(repo.log()) == "bcdaAefg"
+
+
 def test_keep_going_up_fixup(repo: Git):
     for c in "abcd":
         repo.w(c, c)
