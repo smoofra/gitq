@@ -1,4 +1,4 @@
-# Git Queues
+# GitQ
 
 ##  ⚠️ 🪏 Work In Progress 🪏 ⚠️ 
 
@@ -46,10 +46,12 @@ upstream.   You need to repeatedly rebase this patch set onto new versions
 of the project.   Essentially, the patches are your source code.   You
 would like to use a version control system to track changes to the patches.
 
-## But Why?
+## FAQ
 
-None of the existing tools do quite what I want.   In particular, Git Queues has
-the following distinguishing characteristics
+### Why?
+
+None of the existing tools do quite what I want.  In particular, GitQ
+has the following distinguishing characteristics
 
 * Queues can have multiple baselines.
 
@@ -61,16 +63,31 @@ the following distinguishing characteristics
 * Each patch is a git commit.   As much as possible, ordinary git commands
   are used to manipulate patches.
 
-* The commit history of a queue feels like a git commit history.  That is,
-  commits are user-curated checkpoints, with user-written commit messages.
+* The commit history of a queue *is* a git commit history.  You can use
+  `git log`, or `tig` to inspect it.   You can use `git diff` to diff it.
+
+  Commits are user-curated checkpoints, with user-written commit messages.
   The history is not a detailed log of every micro-operation that was used
   to create a queue.   The data model is as simple as possible.   Git is a
   "stupid" content tracker, because it tracks versions of the content of a
   source directory.   There is no specific representation in git to, for
   example, move a file.  The contents of the file are simply moved to a new
-  location.  Git Queues aims to track the content of a patch series in the
-  same spirit that Git tracks the content of a directory.
+  location.  GitQ aims to track the content of a patch series in the same
+  spirit, and *with the same mechanism* that Git tracks the content of a
+  directory.
 
+### Is this a new version control system based on git?
+
+No!  GitQ adds new functionality to Git.  It automates workflows that are
+awkward and manual in Git.
+
+### Is this a alternate user interface to git?
+
+No! GitQ does not wrap Git's existing functionality in a new interface. You
+do not need learn a new set of commands overlapping with the Git commands
+you already know to use GitQ.   Use normal git commands, and mix them
+freely with GitQ commands.   GitQ will print out a log of Git commands it
+executes, so you can understand what it's doing.
 
 ## `git-queue`
 
