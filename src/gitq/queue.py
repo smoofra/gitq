@@ -88,13 +88,6 @@ class Baseline(YAMLObject):
 
 
 @dataclass
-class Patch(YAMLObject):
-
-    yaml_loader = Loader
-    yaml_dumper = Dumper
-
-
-@dataclass
 class QueueFile(YAMLObject):
 
     yaml_loader = Loader
