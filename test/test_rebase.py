@@ -901,8 +901,14 @@ def test_bare(repo: Git):
 
     repo.s("git queue rebase")
     assert repo.log() == ["a", "b", "p", "q"]
+
+    base = repo.so("git config branch.queue.git-queue | awk '/sha/ {print $3}'")
+    assert repo.rev_parse("base") == base
+    sha = repo.rev_parse("HEAD")
+
     repo.s("git queue rebase")
     assert repo.log() == ["a", "b", "p", "q"]
+    assert sha == repo.rev_parse("HEAD")  # "Already up to date"
 
     repo.s("git queue rebase --no-bare")
     assert repo.log() == ["a", "b", "baseline", "p", "q"]
@@ -919,3 +925,23 @@ def test_bare(repo: Git):
     repo.s("git queue abort")
     assert repo.log() == ["a", "b", "p", "q"]
     repo.s("git config get branch.queue.git-queue")
+
+    repo.s("git branch -f base base^")
+
+    repo.s("git checkout -q base -b base2")
+    repo.c("z")
+    repo.s("git checkout -q queue")
+    repo.s("git queue add base2")
+    assert repo.log() == ["a", "b", "z", "merged baselines", "p", "q"]
+    repo.s("! test -f .git-queue")
+    repo.s("git config get branch.queue.git-queue")
+    sha = repo.rev_parse("HEAD")
+
+    repo.s("git queue rebase")
+    assert sha == repo.rev_parse("HEAD")  # Already up to date
+
+    repo.s("git checkout -b queue2 -q base")
+    repo.c("r")
+    repo.s("git queue init --bare base2")
+    repo.s("git queue rebase")
+    assert repo.log() == ["a", "b", "z", "r"]

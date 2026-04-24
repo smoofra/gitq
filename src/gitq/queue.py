@@ -287,6 +287,26 @@ class Queue:
             if c.is_merge and c.sha in baseline_shas and not is_merged_baseline(c):
                 yield c
 
+    def get_commits(self, reverse: bool = False) -> List[Commit]:
+        return self.git.commits(*(f"^{b.sha}" for b in self.qf.baselines), "HEAD", reverse=reverse)
+
+    def queue_is_clean(self) -> bool:
+        """
+        Check if queue history is clean -- that is, it only contains
+        merged baseline commits and patches
+        """
+        baseline_shas: set[str] = set()
+        for c in self.get_commits():
+            if is_merged_baseline(c):
+                baseline_shas.add(c.sha)
+            if c.sha in baseline_shas:
+                for p in c.parents:
+                    baseline_shas.add(p)
+                continue
+            if c.is_merge or from_this_tool(c):
+                return False
+        return True
+
     @classmethod
     def find_patches(
         cls, ref: str, baselines: List[Baseline], new_base: str, *, git: Git
@@ -322,8 +342,7 @@ class Queue:
         "return a list of shas that git-swap should not proceed past"
         for b in self.qf.baselines:
             yield b.sha
-        commits = self.git.commits(*(f"^{b.sha}" for b in self.qf.baselines), "HEAD", reverse=True)
-        for commit in commits:
+        for commit in self.get_commits():
             if from_this_tool(commit):
                 yield commit.sha
 
@@ -348,11 +367,13 @@ class Queue:
         # that as the limit.
         return bases[0]
 
-    def rebase(self, onto: List[Baseline] | None, to_bare: bool, refresh: bool = True) -> None:
+    def rebase(
+        self, onto: List[Baseline] | None, force: bool, to_bare: bool | None, refresh: bool = True
+    ) -> None:
         if self.is_historiography:
             raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
-            Rebase(onto=onto, bare=self.bare, to_bare=to_bare, refresh=refresh).run()
+            Rebase(force=force, onto=onto, bare=self.bare, to_bare=to_bare, refresh=refresh).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
     # tracking it, detect that.
@@ -383,7 +404,7 @@ class Queue:
 
     def write_patches(self) -> Iterator[Path]:
         os.makedirs(self.patch_directory, exist_ok=True)
-        commits = self.git.commits(*(f"^{b.sha}" for b in self.qf.baselines), "HEAD", reverse=True)
+        commits = self.get_commits(reverse=True)
         num_digits = len(str(len(commits) - 1))
         for i, commit in enumerate(commits):
             yield commit.make_patch_file(self.patch_directory, index=(i, num_digits))
@@ -628,6 +649,7 @@ class Rebase(Step):
     to_bare: bool | None
     onto: None | List[Baseline] = field(default=None)
     refresh: bool = True
+    force: bool = False
 
     def run(self) -> None:
         steps: List[Step] = list()
@@ -638,6 +660,17 @@ class Rebase(Step):
                 if q.needs_rebase(baseline.ref, git=self.git):
                     assert baseline.ref
                     steps.append(RebaseBranch(baseline.ref))
+
+        if (
+            not self.force
+            and not steps
+            and all(refresh_baseline(b, git=self.git).sha == b.sha for b in q.qf.baselines)
+            and all(self.git.is_ancestor(b.sha) for b in q.qf.baselines)
+            and q.queue_is_clean()
+            and (self.to_bare is None or (bool(self.bare) == self.to_bare))
+        ):
+            Output.print("Already up to date.")
+            return
 
         steps.append(
             RebaseOne(onto=self.onto, bare=self.bare, to_bare=self.to_bare, refresh=self.refresh)
@@ -776,6 +809,8 @@ class MergeBaselines(Step, Continuation):
         if not needed:
             if not q.bare:
                 q.save_queuefile(commit_message=message("baseline", q.qf.title))
+            else:
+                q.save_queuefile()
             return
 
         # try octopus merge first

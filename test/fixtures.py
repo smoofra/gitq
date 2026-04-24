@@ -40,6 +40,13 @@ class Directory:
             else:
                 subprocess.run(c, check=True, cwd=self.path, stderr=sys.stdout)
 
+    def so(self, command: str) -> str:
+        "run a shell command and return output"
+        Output.flush()
+        c = ["bash", "-c", command]
+        p = subprocess.run(c, check=True, text=True, cwd=self.path, capture_output=True)
+        return p.stdout.strip()
+
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"
         Output.flush()

@@ -238,10 +238,14 @@ class Main(continuations.Main):
                 q = Queue(self.git, bare=DETECT)
                 onto = list(q.qf.baselines)
 
+                force = not getattr(args, "refresh", True)
+
                 for baseline in getattr(args, "add", ()):
+                    force = True
                     onto.append(parse_baseline(baseline, git=self.git))
 
                 for baseline in getattr(args, "remove", ()):
+                    force = True
                     if baseline.startswith("refs/"):
                         ref = baseline
                     else:
@@ -253,7 +257,12 @@ class Main(continuations.Main):
                         raise UserError(f"{ref} not found in baselines")
                     del onto[i]
 
-                q.rebase(onto=onto, to_bare=args.bare, refresh=getattr(args, "refresh", True))
+                q.rebase(
+                    onto=onto,
+                    force=force,
+                    to_bare=args.bare,
+                    refresh=getattr(args, "refresh", True),
+                )
 
 
 main = Main()
