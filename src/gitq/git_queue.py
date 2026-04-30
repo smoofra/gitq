@@ -4,7 +4,7 @@ import argparse
 import yaml
 
 from .git import Git
-from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT
+from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT, message
 from .continuations import Abort, UserError, Heading, Skip
 from . import continuations
 
@@ -263,6 +263,12 @@ class Main(continuations.Main):
                     to_bare=args.bare,
                     refresh=getattr(args, "refresh", True),
                 )
+
+    def check_clean(self):
+        if set(self.git.dirty_files()) == {Queue.queuefile_name}:
+            m = message("update .git-queue", "update-queuefile")
+            self.git("commit", "-m", m, Queue.queuefile_name)
+        super().check_clean()
 
 
 main = Main()

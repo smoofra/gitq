@@ -105,10 +105,10 @@ yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=D
 Continuation.register(Baseline)
 Continuation.register(QueueFile)
 
-CommitType = Literal["baseline", "init"]
+CommitType = Literal["baseline", "update-queuefile"]
 
 
-def message(m: str, type: CommitType, title: str | None):
+def message(m: str, type: CommitType, title: str | None = None):
     trailers = f"GitQ-Type: {type}"
     if title:
         return f"{m}: {title}\n\n{trailers}"
@@ -269,7 +269,7 @@ class Queue:
                 "commit",
                 "--allow-empty",
                 "-m",
-                message("initialized queue", "init", self.qf.title),
+                message("initialized queue", "update-queuefile", self.qf.title),
             )
 
     @staticmethod

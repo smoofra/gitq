@@ -170,10 +170,13 @@ class Main:
             Output.print("Cancelled.  Previous state restored.")
         sys.exit(0)
 
-    @contextmanager
-    def setup(self) -> Iterator:
+    def check_clean(self):
         if not self.git.is_clean():
             raise UserError("Error: repo not clean")
+
+    @contextmanager
+    def setup(self) -> Iterator:
+        self.check_clean()
         if self.git.continuation.exists():
             with open(self.git.continuation, "r") as f:
                 j: Continuations = yaml.load(f, Loader)

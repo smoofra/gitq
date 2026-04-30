@@ -2,7 +2,7 @@ import os
 import subprocess
 import re
 import email
-from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
+from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple, Optional
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cache
@@ -64,6 +64,25 @@ def coalesce(lines: Iterable[str]) -> Iterator[str]:
         cur = line
     if cur is not None:
         yield cur
+
+
+class StatusEntry(NamedTuple):
+    staged: str  # index status char (' ', 'M', 'A', 'D', 'R', 'C', 'U', '?', '!')
+    unstaged: str  # working tree status char
+    path: str
+    orig_path: Optional[str]  # set for renames/copies
+
+
+def parse_porcelain_z(output: str) -> Iterator[StatusEntry]:
+    tokens = iter(output.split("\0"))
+    for entry in tokens:
+        if not entry:
+            continue
+        staged, unstaged, path = entry[0], entry[1], entry[3:]
+        orig_path = None
+        if staged in ("R", "C"):
+            orig_path = next(tokens)
+        yield StatusEntry(staged, unstaged, path, orig_path)
 
 
 class Sha(str):
@@ -431,3 +450,15 @@ class Git:
                 path = self.directory / f
                 if path.exists():
                     path.unlink()
+
+    def status(self) -> Iterator[StatusEntry]:
+        out = self.cmd(["git", "status", "--porcelain", "-z"], quiet=True)
+        yield from parse_porcelain_z(out)
+
+    def dirty_files(self) -> Iterator[str]:
+        for line in self.status():
+            if line.staged == "?" and line.unstaged == "?":
+                continue
+            yield line.path
+            if line.orig_path is not None:
+                yield line.orig_path

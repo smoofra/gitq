@@ -945,3 +945,20 @@ def test_bare(repo: Git):
     repo.s("git queue init --bare base2")
     repo.s("git queue rebase")
     assert repo.log() == ["a", "b", "z", "r"]
+
+
+def test_check_clean_commits_dirty_queuefile(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.s("git queue init base")
+
+    queuefile = repo / ".git-queue"
+    with open(queuefile, "a") as f:
+        f.write("# user edit\n")
+
+    # Without the auto-commit in check_clean, this would fail with "repo not clean"
+    repo.s("git queue rebase")
+
+    # The queuefile commit is rebased away, but appears in the reflog
+    reflog = repo.so("git log -g --format=%s")
+    assert any("update .git-queue" in line for line in reflog.splitlines())
