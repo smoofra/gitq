@@ -150,8 +150,8 @@ def test_patch(repo):
     repo.s("git reset -q --hard HEAD^")
     repo.s(f"git am {patch}")
     msg = email.message_from_string(patch.read_text())
-    committer_name, committer_addr = email.utils.parseaddr(msg["X-Gitq-Committer"])
-    committer_date = msg["X-Gitq-CommitterDate"]
+    committer_name, committer_addr = email.utils.parseaddr(msg["GitQ-Committer"])
+    committer_date = msg["GitQ-CommitterDate"]
     with env(
         GIT_COMMITTER_NAME=committer_name,
         GIT_COMMITTER_EMAIL=committer_addr,
@@ -182,11 +182,11 @@ def test_patch_merge(repo):
 
     msg = email.message_from_string(patch.read_text())
 
-    committer_name, committer_addr = email.utils.parseaddr(msg["X-Gitq-Committer"])
-    committer_date = msg["X-Gitq-CommitterDate"]
+    committer_name, committer_addr = email.utils.parseaddr(msg["GitQ-Committer"])
+    committer_date = msg["GitQ-CommitterDate"]
     author_name, author_addr = email.utils.parseaddr(msg["From"])
     author_date = msg["Date"]
-    parents = msg["X-Gitq-Parents"].split()
+    parents = msg["GitQ-Parents"].split()
     assert len(parents) == 2
 
     subject = msg["Subject"]

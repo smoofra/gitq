@@ -486,11 +486,11 @@ class Queue:
     def recreate_commit(self, patch_path: str, *, index: str) -> Sha:
         with open(self.git.directory / patch_path, "r") as f:
             msg = email.message_from_file(f)
-        committer_name, committer_email = email.utils.parseaddr(msg["X-Gitq-Committer"])
-        committer_date = msg["X-Gitq-CommitterDate"]
+        committer_name, committer_email = email.utils.parseaddr(msg["GitQ-Committer"])
+        committer_date = msg["GitQ-CommitterDate"]
         author_name, author_email = email.utils.parseaddr(msg["From"])
         author_date = msg["Date"]
-        parents = [Sha(x) for x in msg["X-Gitq-Parents"].split()]
+        parents = [Sha(x) for x in msg["GitQ-Parents"].split()]
         title = msg["Subject"].removeprefix("[PATCH] ")
         body_raw = msg.get_payload()
         m = re.match(r"From ([0-9a-fA-F]+)", msg.get_unixfrom() or "")

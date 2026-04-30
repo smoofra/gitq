@@ -131,9 +131,9 @@ class Commit(object):
             + "%nFrom: %aN <%aE>"
             + "%nDate: %aD"
             + "%nSubject: [PATCH] %s"
-            + "%nX-Gitq-Committer: %cN <%cE>"
-            + "%nX-Gitq-CommitterDate: %cD"
-            + "%nX-Gitq-Parents: %P"
+            + "%nGitQ-Committer: %cN <%cE>"
+            + "%nGitQ-CommitterDate: %cD"
+            + "%nGitQ-Parents: %P"
             + "%n%n%b"
         )
         filename = self.git("log", "-1", "--format=%f", self.sha, quiet=True).strip() + ".patch"
