@@ -25,13 +25,9 @@ from .yaml import YAMLObject, BaseLoader, contextGit
 class Loader(BaseLoader):
     "YAML loader for .git/continuation.yaml"
 
-    pass
-
 
 class Dumper(yaml.Dumper):
     "YAML dumper for .git/continuation.yaml"
-
-    pass
 
 
 @dataclass

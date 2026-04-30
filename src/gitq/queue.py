@@ -31,8 +31,6 @@ from .yaml import YAMLObject, BaseLoader
 class Detect:
     "A sentinel value"
 
-    pass
-
 
 DETECT = Detect()
 
