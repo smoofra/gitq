@@ -3,7 +3,7 @@ import argparse
 
 import yaml
 
-from .git import Git
+from .git import Git, GitFailed
 from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT, message, RebaseOptions
 from .continuations import Abort, UserError, Heading, Skip
 from . import continuations
@@ -260,18 +260,42 @@ class Main(continuations.Main):
                     force = True
                     onto.append(parse_baseline(baseline, git=self.git))
 
-                for baseline in getattr(args, "remove", ()):
+                for baseline_arg in getattr(args, "remove", ()):
                     force = True
-                    if baseline.startswith("refs/"):
-                        ref = baseline
-                    else:
-                        ref = self.git.symbolic_full_name(baseline)
-                    for i, baseline in enumerate(onto):
-                        if baseline.ref == ref:
-                            break
-                    else:
-                        raise UserError(f"{ref} not found in baselines")
-                    del onto[i]
+                    try:
+                        baseline = parse_baseline(baseline_arg, git=self.git)
+                        for i, b in enumerate(onto):
+                            if baseline.ref == b.ref and baseline.remote == b.remote:
+                                break
+                        else:
+                            raise UserError(f"{baseline_arg} not found in baselines")
+                        del onto[i]
+                    except GitFailed:
+                        # maybe the ref no longe exists, try to guess
+                        found = list()
+                        remote = None
+                        if m := re.match("(?:(?:refs/)?remotes/)?([^/]+)/(.*)$", baseline_arg):
+                            try:
+                                remote = self.git.remote_url(m.group(1))
+                            except GitFailed:
+                                pass
+                        for i, b in enumerate(onto):
+                            if (
+                                b.ref == baseline_arg
+                                or b.ref == "refs/heads/" + baseline_arg
+                                or (
+                                    remote
+                                    and m
+                                    and b.remote == remote
+                                    and b.ref == "refs/heads/" + m.group(2)
+                                )
+                            ):
+                                found.append(i)
+                        if not found:
+                            raise UserError(f"{baseline_arg} not found in baselines")
+                        if len(found) > 1:
+                            raise UserError(f"{baseline_arg} is ambiguous")
+                        del onto[found[0]]
 
                 opts = RebaseOptions(
                     onto=onto,

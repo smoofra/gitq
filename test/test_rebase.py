@@ -1098,3 +1098,94 @@ def test_no_use_local_recursive(remote_repo):
     local.s("git checkout -q B")
     local.s("git queue rebase --no-use-local")
     assert local.log() == ["0", "baseline", "a", "a2", "baseline", "b"]
+
+
+def test_remove_stale_by_full_ref(repo: Git):
+    """--remove refs/heads/base still works after the branch is deleted (exact ref match)"""
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.c("patch")
+    repo.s("git branch -D base")
+    # parse_baseline("refs/heads/base") raises GitFailed; guessing matches b.ref == baseline_arg
+    repo.s(
+        "git queue rebase --remove refs/heads/base",
+        check_error="Cannot rebase queue onto zero baselines",
+    )
+
+
+def test_remove_stale_by_short_name(repo: Git):
+    """--remove base still works after the branch is deleted (short name match)"""
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.c("patch")
+    repo.s("git branch -D base")
+    # parse_baseline("base") raises GitFailed; guessing matches b.ref == "refs/heads/" + arg
+    repo.s("git queue rebase --remove base", check_error="Cannot rebase queue onto zero baselines")
+
+
+def test_remove_stale_by_remote_tracking(remote_repo):
+    """--remove refs/remotes/origin/base-branch still works after the remote branch is pruned"""
+    local, remote = remote_repo
+    remote.c("base-init")
+    remote.s("git checkout -b base-branch")
+    remote.c("base-work")
+    local.s("git fetch origin")
+    local.s("git checkout --no-track -b q origin/base-branch")
+    local.s("git queue init origin/base-branch")
+    local.c("patch")
+    # Prune the remote branch so origin/base-branch disappears locally
+    remote.s("git checkout master")
+    remote.s("git branch -D base-branch")
+    local.s("git fetch --prune origin")
+    # parse_baseline("refs/remotes/origin/base-branch") raises GitFailed;
+    # guessing matches via remote URL: b.remote == origin_url and b.ref == "refs/heads/base-branch"
+    local.s(
+        "git queue rebase --remove refs/remotes/origin/base-branch",
+        check_error="Cannot rebase queue onto zero baselines",
+    )
+
+
+def test_remove_stale_by_remote_tracking_short(remote_repo):
+    """--remove refs/remotes/origin/base-branch still works after the remote branch is pruned"""
+    local, remote = remote_repo
+    remote.c("base-init")
+    remote.s("git checkout -b base-branch")
+    remote.c("base-work")
+    local.s("git fetch origin")
+    local.s("git checkout --no-track -b q origin/base-branch")
+    local.s("git queue init origin/base-branch")
+    local.c("patch")
+    # Prune the remote branch so origin/base-branch disappears locally
+    remote.s("git checkout master")
+    remote.s("git branch -D base-branch")
+    local.s("git fetch --prune origin")
+    local.s(
+        "git queue rebase --remove origin/base-branch",
+        check_error="Cannot rebase queue onto zero baselines",
+    )
+
+
+def test_remove_stale_not_found(repo: Git):
+    """--remove with a stale name that matches no baseline raises an error"""
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.c("patch")
+    repo.s("git branch -D base")
+    repo.s("git queue rebase --remove nonexistent", check_error="not found in baselines")
+
+
+def test_remove_stale_ambiguous(repo: Git):
+    """--remove where name matches multiple baselines raises an error"""
+    repo.c("0")
+    repo.s("git checkout -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base base")  # two identical baselines
+    repo.c("patch")
+    repo.s("git branch -D base")
+    repo.s("git queue rebase --remove base", check_error="is ambiguous")
