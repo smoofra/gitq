@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, replace
-from typing import List, Iterator, ContextManager
+from typing import List, Iterator, ContextManager, Literal
 from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
@@ -105,29 +105,31 @@ yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=D
 Continuation.register(Baseline)
 Continuation.register(QueueFile)
 
+CommitType = Literal["baseline", "init"]
 
-def message(m: str, title: str | None):
-    trailers = "Tool: gitq"
+
+def message(m: str, type: CommitType, title: str | None):
+    trailers = f"GitQ-Type: {type}"
     if title:
         return f"{m}: {title}\n\n{trailers}"
     else:
         return f"{m}\n\n{trailers}"
 
 
-# FIXME this was used improperly as a test for baseline commits. Check
-# existing callers to figure out what they really mean by it and make it
-# more specific.
-
-
 def from_this_tool(c: Commit) -> bool:
-    return c.message.rstrip().endswith("\nTool: gitq")
+    trailers = c.trailers()
+    if trailers.get("Tool") == "gitq":
+        return True  # Old trailers.  TODO remove this
+    return bool(trailers.get("GitQ-Type"))
 
 
 def is_merged_baseline(c: Commit) -> bool:
-    m = c.message.strip()
-    return m.endswith("\nTool: gitq") and (
-        m.startswith("baseline") or m.startswith("merged baselines")
-    )
+    trailers = c.trailers()
+    if trailers.get("Tool") == "gitq" and (
+        c.message.startswith("baseline") or c.message.startswith("merged baseline")
+    ):
+        return True  # Old trailers.  TODO remove this
+    return trailers.get("GitQ-Type") == "baseline"
 
 
 class NotAQueue(UserError):
@@ -263,7 +265,12 @@ class Queue:
             self.save_queuefile(stage=True)
             if self.bare:
                 return
-            self.git("commit", "--allow-empty", "-m", message("initialized queue", self.qf.title))
+            self.git(
+                "commit",
+                "--allow-empty",
+                "-m",
+                message("initialized queue", "init", self.qf.title),
+            )
 
     @staticmethod
     def find_user_merges(commits: List[Commit]) -> Iterator[Commit]:
@@ -341,7 +348,7 @@ class Queue:
         for b in self.qf.baselines:
             yield b.sha
         for commit in self.get_commits():
-            if from_this_tool(commit):
+            if is_merged_baseline(commit):
                 yield commit.sha
 
     @classmethod
@@ -751,7 +758,7 @@ class MergeBaselines(Step, Continuation):
 
     @cached_property
     def m(self) -> str:
-        return message("merged baselines", self.qf.title)
+        return message("merged baselines", "baseline", self.qf.title)
 
     def check_user_merges(self):
         """
@@ -806,7 +813,7 @@ class MergeBaselines(Step, Continuation):
         needed = list(self.still_needed())
         if not needed:
             if not q.bare:
-                q.save_queuefile(commit_message=message("baseline", q.qf.title))
+                q.save_queuefile(commit_message=message("baseline", "baseline", q.qf.title))
             else:
                 q.save_queuefile()
             return

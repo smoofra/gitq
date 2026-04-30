@@ -1,6 +1,7 @@
 import os
 import subprocess
 import re
+import email
 from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple
 from pathlib import Path
 from contextlib import contextmanager
@@ -145,6 +146,13 @@ class Commit(object):
             cmd = ["git", "show", "--diff-merges=first-parent", "--format=" + format, self.sha]
             subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory)
         return path
+
+    def trailers(self) -> dict[str, str]:
+        "parse RFC822 trailers from commit message"
+        paragraphs = self.message.strip().split("\n\n")
+        if not paragraphs:
+            return {}
+        return dict(email.message_from_string(paragraphs[-1]).items())
 
 
 class Git:

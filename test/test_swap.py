@@ -122,7 +122,7 @@ def test_keep_going_baseline(repo: Git):
     assert repo.log() == ["a", "b", "initialized queue", "c", "d", "e", "X"]
     repo.s("git swap --keep-going")
     assert repo.t(f"git diff --exit-code {sha} HEAD")
-    assert repo.log() == ["a", "b", "initialized queue", "X", "c", "d", "e"]
+    assert repo.log() == ["a", "b", "X", "initialized queue", "c", "d", "e"]
 
 
 def test_keep_going_upstream_baseline(repo: Git):
