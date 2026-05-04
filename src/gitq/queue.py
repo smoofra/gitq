@@ -4,7 +4,6 @@ from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cached_property
-from tempfile import NamedTemporaryFile
 import email.utils
 import os
 import re
@@ -485,13 +484,13 @@ class Queue:
     def recreate_queue(self) -> Sha:
         if not self.qf.commits:
             raise UserError("This is not a historiography branch")
-        with NamedTemporaryFile(prefix="index") as index:
+        with self.git.temp_index() as git:
             for path in self.qf.commits:
-                sha = self.recreate_commit(path, index=index.name)
+                sha = self.recreate_commit(path, git=git)
         return sha  # type: ignore[possibly-undefined]
 
-    def recreate_commit(self, patch_path: str, *, index: str) -> Sha:
-        with open(self.git.directory / patch_path, "r") as f:
+    def recreate_commit(self, patch_path: str, *, git: Git) -> Sha:
+        with open(git.directory / patch_path, "r") as f:
             msg = email.message_from_file(f)
         committer_name, committer_email = email.utils.parseaddr(msg["GitQ-Committer"])
         committer_date = msg["GitQ-CommitterDate"]
@@ -508,10 +507,8 @@ class Queue:
         body = body_raw[: sep.start()].strip() if sep else body_raw.strip()
         commit_message = title + "\n" if not body else title + "\n\n" + body + "\n"
 
-        env = dict(os.environ)
-        env.update(
+        git.env.update(
             {
-                "GIT_INDEX_FILE": index,
                 "GIT_AUTHOR_NAME": author_name,
                 "GIT_AUTHOR_EMAIL": author_email,
                 "GIT_AUTHOR_DATE": author_date,
@@ -521,9 +518,9 @@ class Queue:
             }
         )
 
-        self.git.cmd(["git", "read-tree", parents[0]], env=env, quiet=True)
-        self.git.cmd(["git", "apply", "--cached", patch_path], env=env, quiet=True)
-        tree = Sha(self.git.cmd(["git", "write-tree"], env=env, quiet=True).strip())
+        git.cmd(["git", "read-tree", parents[0]], quiet=True)
+        git.cmd(["git", "apply", "--cached", patch_path], quiet=True)
+        tree = Sha(git.cmd(["git", "write-tree"], quiet=True).strip())
 
         def p():
             for parent in parents:
@@ -531,7 +528,7 @@ class Queue:
                 yield parent
 
         cmd = ["git", "commit-tree", tree, *p(), "-m", commit_message]
-        sha = Sha(self.git.cmd(cmd, env=env, quiet=True).strip())
+        sha = Sha(git.cmd(cmd, quiet=True).strip())
 
         if sha0 != sha:
             raise Exception("re-created sha does not match")

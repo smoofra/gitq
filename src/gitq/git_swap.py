@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os
 import sys
 from contextlib import contextmanager
 from typing import List, Optional, Iterator, TypeVar, NoReturn
@@ -109,21 +108,18 @@ class OrSquash(Continuation):
             with checkout_baseline(C.sha if C else None, git=self.git):
                 self.git.checkout_tree(A.sha)
                 author = split_author(B.author)
-                env = dict(os.environ)
-                env.update(
-                    {
-                        "GIT_AUTHOR_NAME": author.name,
-                        "GIT_AUTHOR_EMAIL": author.email,
-                        "GIT_AUTHOR_DATE": author.date,
-                    }
-                )
                 message = self.git.gitdir / "COMMIT_EDITMSG"
                 with open(message, "w") as f:
                     f.write(B.message)
                     f.write("\n\n")
                     f.write(A.message)
                 cmd = ["git", "commit", "--allow-empty", "--edit", "-F", message]
-                self.git.cmd(cmd, env=env, interactive=True)
+                with self.git.temp_env(
+                    GIT_AUTHOR_NAME=author.name,
+                    GIT_AUTHOR_EMAIL=author.email,
+                    GIT_AUTHOR_DATE=author.date,
+                ) as git:
+                    git.cmd(cmd, interactive=True)
             if self.stop:
                 raise Stop
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from gitq.git import split_author, Git, UserError, Commit
-from .fixtures import repo, env
+from .fixtures import repo
 
 _ = repo
 
@@ -49,12 +49,12 @@ def test_gitdir(repo, sub: str, cwd: str, rel: bool):
     "test .gitdir and .directory are initialized correctly"
     if "PYTEST_XDIST_WORKER" in os.environ:
         ctx = multiprocessing.get_context("spawn")
-        p = ctx.Process(target=_test_gitdir, args=(str(repo.path), sub, cwd, rel))
+        p = ctx.Process(target=_test_gitdir, args=(str(repo.directory), sub, cwd, rel))
         p.start()
         p.join()
         assert p.exitcode == 0
     else:
-        _test_gitdir(repo.path, sub, cwd, rel)
+        _test_gitdir(repo.directory, sub, cwd, rel)
 
 
 def _test_gitdir(repo: Path | str, sub: str, cwd: str, rel: bool):
@@ -143,8 +143,9 @@ j_random = dict(
 
 def test_patch(repo):
     repo.c("0")
-    with env(**j_random):
-        repo.c("do a thing\n\nwith some details", filename="a")
+    with repo.temp_env() as git:
+        git.env.update(j_random)
+        git.c("do a thing\n\nwith some details", filename="a")
     patch = repo.commit("HEAD").make_patch_file(repo)
     A = repo.commit("HEAD")
     repo.s("git reset -q --hard HEAD^")
@@ -152,12 +153,11 @@ def test_patch(repo):
     msg = email.message_from_string(patch.read_text())
     committer_name, committer_addr = email.utils.parseaddr(msg["GitQ-Committer"])
     committer_date = msg["GitQ-CommitterDate"]
-    with env(
-        GIT_COMMITTER_NAME=committer_name,
-        GIT_COMMITTER_EMAIL=committer_addr,
-        GIT_COMMITTER_DATE=committer_date,
-    ):
-        repo.s("git commit --amend --no-edit")
+    with repo.temp_env() as git:
+        git.env["GIT_COMMITTER_NAME"] = committer_name
+        git.env["GIT_COMMITTER_EMAIL"] = committer_addr
+        git.env["GIT_COMMITTER_DATE"] = committer_date
+        git.s("git commit --amend --no-edit")
     B = repo.commit("HEAD")
     repo.s(f"git diff {A.sha} {B.sha}")
 
@@ -175,7 +175,8 @@ def test_patch_merge(repo):
     repo.c("b")
     repo.s("git checkout -q master")
     repo.c("a")
-    with env(**j_random):
+    with repo.temp_env() as repo:
+        repo.env.update(j_random)
         repo.s("git merge -q b -m 'merge some commits\n\nblah blah blah\n'")
     patch = repo.commit("HEAD").make_patch_file(repo)
     A = repo.commit("HEAD")
@@ -202,15 +203,14 @@ def test_patch_merge(repo):
     repo.s(f"git apply --cached {patch}")
     tree = repo.cmd(["git", "write-tree"], quiet=True).strip()
 
-    with env(
-        GIT_AUTHOR_NAME=author_name,
-        GIT_AUTHOR_EMAIL=author_addr,
-        GIT_AUTHOR_DATE=author_date,
-        GIT_COMMITTER_NAME=committer_name,
-        GIT_COMMITTER_EMAIL=committer_addr,
-        GIT_COMMITTER_DATE=committer_date,
-    ):
-        B_sha = repo.cmd(
+    with repo.temp_env() as repo2:
+        repo2.env["GIT_AUTHOR_NAME"] = author_name
+        repo2.env["GIT_AUTHOR_EMAIL"] = author_addr
+        repo2.env["GIT_AUTHOR_DATE"] = author_date
+        repo2.env["GIT_COMMITTER_NAME"] = committer_name
+        repo2.env["GIT_COMMITTER_EMAIL"] = committer_addr
+        repo2.env["GIT_COMMITTER_DATE"] = committer_date
+        B_sha = repo2.cmd(
             ["git", "commit-tree", tree, "-p", parents[0], "-p", parents[1], "-m", commit_message],
             quiet=True,
         ).strip()

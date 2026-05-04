@@ -2,10 +2,11 @@ import os
 import subprocess
 import re
 import email
-from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple, Optional
+from typing import List, Iterator, NamedTuple, Set, Iterable, Tuple, Optional, Any
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cache
+from tempfile import NamedTemporaryFile
 
 from .output import Output
 
@@ -113,7 +114,7 @@ class Commit(object):
             if key == "parent":
                 self.parents.append(Sha(value))
             if key == "tree":
-                self.tree = value
+                self.tree = Sha(value)
             if key == "author":
                 self.author = value
             if key == "committer":
@@ -163,7 +164,7 @@ class Commit(object):
         path = directory / filename
         with open(path, "wt") as f:
             cmd = ["git", "show", "--diff-merges=first-parent", "--format=" + format, self.sha]
-            subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory)
+            subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory, env=self.git.env)
         return path
 
     def trailers(self) -> dict[str, str]:
@@ -179,8 +180,10 @@ class Git:
     gitdir: Path  # .git
     directory: Path  # toplevel, and where commands are run from
     fetched: Set[str]
+    env: dict[str, str]
 
-    def __init__(self, directory=None):
+    def __init__(self, directory=None, *, env=None):
+        self.env = dict(os.environ if env is None else env)
         self.fetched = set()
         self.directory = Path(directory or ".")
         try:
@@ -199,10 +202,11 @@ class Git:
             return str(x)
 
     def cmd(
-        self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = "", **kw
+        self, cmd, *, quiet: bool = False, interactive: bool = False, comment: str = ""
     ) -> str:
         if not quiet:
             Output.log_cmd(list(map(self.abbrev_if_sha, cmd)), comment=comment)
+        kw: dict[str, Any] = {"env": self.env}
         if interactive:
             kw["stderr"] = subprocess.PIPE
         else:
@@ -220,9 +224,14 @@ class Git:
     def __call__(self, *args, quiet: bool = False, comment: str = "") -> str:
         return self.cmd(["git", *args], quiet=quiet, comment=comment)
 
-    def cmd_test(self, args, **kw) -> bool:
+    def cmd_test(self, args) -> bool:
         proc = subprocess.Popen(
-            args, cwd=self.directory, stdin=FNULL, stdout=FNULL, stderr=FNULL, **kw
+            args,
+            cwd=self.directory,
+            stdin=FNULL,
+            stdout=FNULL,
+            stderr=FNULL,
+            env=self.env,
         )
         if proc.wait() not in [0, 1]:
             raise GitFailed("git failed", rc=proc.wait())
@@ -236,7 +245,7 @@ class Git:
         return name or None
 
     def detach(self) -> None:
-        self.cmd(["git", "checkout", self.rev_parse("HEAD")], stderr=FNULL, comment="detach")
+        self.cmd(["git", "checkout", self.rev_parse("HEAD")], comment="detach")
 
     def upstream(self, branch: str) -> Sha | None:
         "return the sha of the branch's upstream, or None"
@@ -250,7 +259,7 @@ class Git:
 
     def head(self) -> Ref | Sha:
         try:
-            return self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True, stderr=FNULL).strip()
+            return self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True).strip()
         except GitFailed:
             return self.rev_parse("HEAD")
 
@@ -261,7 +270,7 @@ class Git:
         return None
 
     def force_checkout(self, branch: str, comment: str = "") -> None:
-        self.cmd(["git", "checkout", "-f", branch], stderr=FNULL, comment=comment)
+        self.cmd(["git", "checkout", "-f", branch], comment=comment)
 
     def commit(self, ref: str) -> Commit:
         log = self.cmd("git log -n1 --no-notes --pretty=raw".split() + [ref, "--"], quiet=True)
@@ -281,7 +290,7 @@ class Git:
             cmd = ["git", "checkout", "--orphan", branch]
         else:
             cmd = ["git", "checkout", branch]
-        self.cmd(cmd, stderr=FNULL, comment=comment)
+        self.cmd(cmd, comment=comment)
 
     @property
     def continuation(self) -> Path:
@@ -393,7 +402,7 @@ class Git:
 
     def merge_tree(self, a: str, b: str) -> Tuple[str, Set[str]]:
         cmd = ["git", "merge-tree", "--name-only", "--no-messages", "-z", a, b]
-        p = subprocess.run(cmd, cwd=self.directory, capture_output=True, text=True)
+        p = subprocess.run(cmd, cwd=self.directory, capture_output=True, text=True, env=self.env)
         if p.returncode not in [0, 1]:
             raise GitFailed(f"git failed:\n{p.stderr}", rc=p.returncode)
         tree, *conflicts = p.stdout.rstrip("\x00").split("\x00")
@@ -462,3 +471,18 @@ class Git:
             yield line.path
             if line.orig_path is not None:
                 yield line.orig_path
+
+    @contextmanager
+    def temp_index(self, tree: Sha | None = None) -> Iterator["Git"]:
+        if tree is None:
+            tree = Sha(self.cmd(["git", "write-tree"], quiet=True).strip())
+        with NamedTemporaryFile(suffix=".git-index") as f:
+            env = {**self.env, "GIT_INDEX_FILE": f.name}
+            git = Git(self.directory, env=env)
+            git.cmd(["git", "read-tree", tree], quiet=True)
+            yield git
+
+    @contextmanager
+    def temp_env(self, **kw) -> Iterator["Git"]:
+        "yield a new git wrapper with a fresh environment that that is safe to mutate."
+        yield type(self)(self.directory, env={**self.env, **kw})

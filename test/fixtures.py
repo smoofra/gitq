@@ -6,7 +6,6 @@ from typing import List
 import os
 import shutil
 import re
-from contextlib import contextmanager
 
 import pytest
 
@@ -17,15 +16,21 @@ from gitq.git_queue import Queue, DETECT
 __all__ = ["Git", "repo"]
 
 
-class Directory:
+# class Directory:
 
-    path: Path
+#     path: Path
 
-    def __init__(self, path: Path):
-        self.path = path
+#     def __init__(self, path: Path):
+#         self.path = path
+
+#     def __truediv__(self, rel: str) -> Path:
+#         return self.path / rel
+
+
+class Git(BaseGit):
 
     def __truediv__(self, rel: str) -> Path:
-        return self.path / rel
+        return self.directory / rel
 
     def s(self, command: str, *, check_error: str = ""):
         "run a shell command"
@@ -34,41 +39,37 @@ class Directory:
         c = ["bash", "-c", command]
         with Output.indent():
             if check_error:
-                p = subprocess.run(c, cwd=self.path, text=True, capture_output=True)
+                p = subprocess.run(
+                    c, cwd=self.directory, text=True, capture_output=True, env=self.env
+                )
                 assert p.returncode != 0
                 assert re.search(check_error, p.stdout)
             else:
-                subprocess.run(c, check=True, cwd=self.path, stderr=sys.stdout)
+                subprocess.run(c, check=True, cwd=self.directory, stderr=sys.stdout, env=self.env)
 
     def so(self, command: str) -> str:
         "run a shell command and return output"
         Output.flush()
         c = ["bash", "-c", command]
-        p = subprocess.run(c, check=True, text=True, cwd=self.path, capture_output=True)
+        p = subprocess.run(
+            c, check=True, text=True, cwd=self.directory, capture_output=True, env=self.env
+        )
         return p.stdout.strip()
 
     def t(self, command: str) -> bool:
         "run a shell command and return success or failure"
         Output.flush()
         with Output.indent():
-            proc = subprocess.run(["bash", "-c", command], cwd=self.path, stderr=sys.stdout)
+            proc = subprocess.run(
+                ["bash", "-c", command], cwd=self.directory, stderr=sys.stdout, env=self.env
+            )
             return proc.returncode == 0
 
     def w(self, filename: str, content: str):
         "write a file"
-        with open(self / filename, "w") as f:
+        with open(self.directory / filename, "w") as f:
             f.write(textwrap.dedent(content).strip())
             f.write("\n")
-
-
-class Git(Directory, BaseGit):
-
-    def __init__(self, path: Path):
-        Directory.__init__(self, path)
-        if not (path / ".git").exists():
-            self.s("git init -q")
-            self.s("git config set advice.detachedHead false")
-        BaseGit.__init__(self, path)
 
     def log(self, n=None) -> List[str]:
         command = ["git", "log", "--topo-order", "--reverse", "--format=%s"]
@@ -125,21 +126,10 @@ def repo(tmp_path: Path) -> Git:
         else:
             x.unlink()
 
+    subprocess.run("git init -q", check=True, shell=True, cwd=tmp_path)
+    subprocess.run(
+        "git config set advice.detachedHead false", check=True, shell=True, cwd=tmp_path
+    )
+
     repo = Git(tmp_path)
     return repo
-
-
-@contextmanager
-def env(**kw):
-    old: dict[str, str | None] = dict()
-    for key, value in kw.items():
-        old[key] = os.environ.get(key, None)
-        os.environ[key] = value
-    try:
-        yield
-    finally:
-        for key, value in old.items():
-            if value is None:
-                del os.environ[key]
-            else:
-                os.environ[key] = value
