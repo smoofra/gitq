@@ -679,6 +679,9 @@ class Rebase(Step):
         q = Queue(self.git, bare=self.bare)
         if self.refresh:
             for baseline in q.qf.baselines:
+                # FIXME this is not even looking at baseline.remote, it
+                # should be looking there and also checking if there are
+                # any local queues set up to track it!
                 if q.needs_rebase(baseline.ref, git=self.git):
                     assert baseline.ref
                     steps.append(RebaseBranch(baseline.ref))
