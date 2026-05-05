@@ -909,14 +909,7 @@ class MergeBaselines(Step, Continuation):
         q = self.q
 
         if len(self.user_merges) > 1:
-            self.user_merges = list(
-                map(
-                    Sha,
-                    self.git("merge-base", "--independent", *self.user_merges, quiet=True)
-                    .strip()
-                    .splitlines(),
-                )
-            )
+            self.user_merges = self.git.independent(*self.user_merges)
 
         # First, check out one of the baselines so there's something to
         # merge into

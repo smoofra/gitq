@@ -483,6 +483,10 @@ class Git:
         else:
             raise GitFailed(f"git merge-tree failed:\n{proc.stderr}", rc=proc.returncode)
 
+    def independent(self, *shas: Sha) -> List[Sha]:
+        out = self("merge-base", "--independent", *shas, quiet=True)
+        return [Sha(x) for x in out.strip().splitlines()]
+
     @cache
     def abbrev(self, ref: Sha) -> str:
         "Return abbreviated sha for ref"
