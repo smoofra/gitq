@@ -390,15 +390,17 @@ class Git:
     def is_conflicted(self, commit: Commit) -> bool:
         if len(commit.parents) < 2:
             return False
-        if len(commit.parents) > 2:
-            raise NotImplementedError  # FIXME merge-tree can only take two arguments!
-        try:
-            tree = self("merge-tree", "--name-only", *commit.parents, quiet=True).strip()
-        except GitFailed as e:
-            if e.rc == 1:
+        current: str = commit.parents[0]
+        for i, parent in enumerate(commit.parents[1:], 1):
+            tree, conflicts = self.merge_tree(current, parent)
+            if conflicts:
                 return True
-            raise
-        return not self.cmd_test(["git", "diff", "--quiet", commit.sha, tree, "--"])
+            if i < len(commit.parents) - 1:  # temp commit so git merge-tree can see ancestry
+                t = self("commit-tree", tree, "-p", current, "-p", parent, "-m", "tmp", quiet=True)
+                current = Sha(t.strip())
+            else:
+                current = tree
+        return not self.cmd_test(["git", "diff", "--quiet", commit.sha, current, "--"])
 
     def merge_tree(self, a: str, b: str) -> Tuple[str, Set[str]]:
         cmd = ["git", "merge-tree", "--name-only", "--no-messages", "-z", a, b]

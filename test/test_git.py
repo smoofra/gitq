@@ -216,3 +216,161 @@ def test_patch_merge(repo):
         ).strip()
 
     assert A.sha == B_sha
+
+
+def test_is_conflicted_non_merge(repo):
+    repo.c("base")
+    assert not repo.is_conflicted(repo.commit("HEAD"))
+
+
+def test_is_conflicted_clean_merge(repo):
+    repo.c("base")
+    repo.s("git checkout -q -b a")
+    repo.c("a", filename="fa")
+    repo.s("git checkout -q master")
+    repo.s("git merge -q a -m 'merge'")
+    assert not repo.is_conflicted(repo.commit("HEAD"))
+
+
+def test_is_conflicted_conflicted_merge(repo):
+    # Both branches modify the same line — merge-tree will report a conflict
+    repo.w("shared", "original")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "base")
+    base = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    repo.s("git checkout -q -b a")
+    repo.w("shared", "version A")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "a")
+    sha_a = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    repo.s(f"git checkout -q -b b {base}")
+    repo.w("shared", "version B")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "b")
+    sha_b = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    tree_a = repo("rev-parse", f"{sha_a}^{{tree}}", quiet=True).strip()
+    merge_sha = repo(
+        "commit-tree", tree_a, "-p", sha_a, "-p", sha_b, "-m", "conflicted merge", quiet=True
+    ).strip()
+    assert repo.is_conflicted(repo.commit(merge_sha))
+
+
+def test_is_conflicted_tampered_merge(repo):
+    # Clean merge but committed with an extra file not in the automatic merge tree
+    repo.c("base")
+    repo.s("git checkout -q -b a")
+    repo.c("a", filename="fa")
+    repo.s("git checkout -q master")
+    repo.c("master", filename="fm")  # diverge so merge can't fast-forward
+    repo.s("git merge -q a -m 'merge'")
+    parents = repo.commit("HEAD").parents
+
+    repo.w("extra", "extra")
+    repo("add", "extra")
+    tampered_tree = repo("write-tree", quiet=True).strip()
+    tampered_sha = repo(
+        "commit-tree",
+        tampered_tree,
+        "-p",
+        parents[0],
+        "-p",
+        parents[1],
+        "-m",
+        "tampered",
+        quiet=True,
+    ).strip()
+    assert repo.is_conflicted(repo.commit(tampered_sha))
+
+
+def test_is_conflicted_clean_octopus(repo):
+    repo.c("base")
+    base = repo("rev-parse", "HEAD", quiet=True).strip()
+    repo.s("git checkout -q -b a")
+    repo.c("a", filename="fa")
+    repo.s(f"git checkout -q -b b {base}")
+    repo.c("b", filename="fb")
+    repo.s("git checkout -q master")
+    repo.c("master", filename="fm")  # diverge so git creates a true octopus
+    repo.s("git merge -q a b -m 'octopus'")
+    c = repo.commit("HEAD")
+    assert len(c.parents) == 3
+    assert not repo.is_conflicted(c)
+
+
+def test_is_conflicted_conflicted_octopus(repo):
+    # Branch a and b conflict; c is clean — octopus merge should be detected as conflicted
+    repo.w("shared", "original")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "base")
+    base = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    repo.s("git checkout -q -b a")
+    repo.w("shared", "version A")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "a")
+    sha_a = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    repo.s(f"git checkout -q -b b {base}")
+    repo.w("shared", "version B")
+    repo("add", "shared")
+    repo("commit", "-q", "-m", "b")
+    sha_b = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    repo.s(f"git checkout -q -b c {base}")
+    repo.c("c", filename="fc")
+    sha_c = repo("rev-parse", "HEAD", quiet=True).strip()
+
+    tree_a = repo("rev-parse", f"{sha_a}^{{tree}}", quiet=True).strip()
+    merge_sha = repo(
+        "commit-tree",
+        tree_a,
+        "-p",
+        sha_a,
+        "-p",
+        sha_b,
+        "-p",
+        sha_c,
+        "-m",
+        "conflicted octopus",
+        quiet=True,
+    ).strip()
+    c = repo.commit(merge_sha)
+    assert len(c.parents) == 3
+    assert repo.is_conflicted(c)
+
+
+def test_is_conflicted_tampered_octopus(repo):
+    # Clean octopus merge but with an extra file injected into the tree
+    repo.c("base")
+    base = repo("rev-parse", "HEAD", quiet=True).strip()
+    repo.s("git checkout -q -b a")
+    repo.c("a", filename="fa")
+    repo.s(f"git checkout -q -b b {base}")
+    repo.c("b", filename="fb")
+    repo.s("git checkout -q master")
+    repo.c("master", filename="fm")  # diverge so git creates a true octopus
+    repo.s("git merge -q a b -m 'octopus'")
+    parents = repo.commit("HEAD").parents
+
+    repo.w("extra", "extra")
+    repo("add", "extra")
+    tampered_tree = repo("write-tree", quiet=True).strip()
+    tampered_sha = repo(
+        "commit-tree",
+        tampered_tree,
+        "-p",
+        parents[0],
+        "-p",
+        parents[1],
+        "-p",
+        parents[2],
+        "-m",
+        "tampered octopus",
+        quiet=True,
+    ).strip()
+    c = repo.commit(tampered_sha)
+    assert len(c.parents) == 3
+    assert repo.is_conflicted(c)
