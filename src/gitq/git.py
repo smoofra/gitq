@@ -174,6 +174,32 @@ class Commit(object):
             return {}
         return dict(email.message_from_string(paragraphs[-1]).items())
 
+    def __hash__(self):
+        return hash(self.sha)
+
+    def __eq__(self, other):
+        return self.sha == other.sha
+
+
+class Patch(Commit):
+    "A commit treated as a patch for purposes of hashing and comparison"
+
+    patch_id: str
+
+    def __init__(self, *, log: str, git: "Git"):
+        super().__init__(log=log, git=git)
+        self.patch_id = git.patch_id(self.sha)
+
+    def __hash__(self):
+        return hash(self.patch_id)
+
+    def __eq__(self, other):
+        try:
+            other_patch_id = other.patch_id
+        except AttributeError:
+            return False
+        return self.patch_id == other_patch_id
+
 
 class Git:
 
@@ -284,6 +310,17 @@ class Git:
         cmd.append("--")
         logs = self.cmd(cmd, quiet=True)
         return [Commit(log=log, git=self) for log in logs.split("\x00") if log]
+
+    def patches_and_merges(self, *refs: str, reverse: bool = False) -> List[Patch | Commit]:
+        commits = self.commits(*refs, reverse=reverse)
+        for commit in commits:
+            if not commit.is_merge:
+                commit.patch_id = self.patch_id(commit.sha)  # type: ignore
+                commit.__class__ = Patch
+        return commits
+
+    def patches(self, *refs: str, reverse: bool = False) -> List[Patch]:
+        return [c for c in self.patches_and_merges(*refs, reverse=reverse) if isinstance(c, Patch)]
 
     def checkout(self, branch: str, *, comment: str = "", orphan: bool = False) -> None:
         if orphan:
@@ -434,6 +471,18 @@ class Git:
         "Return True if ancestor is reachable from descendant"
         return self.cmd_test(["git", "merge-base", "--is-ancestor", ancestor, of])
 
+    def all_merge_bases(self, *refs: Sha, none_ok: bool = False) -> List[Sha]:
+        cmd = ["git", "merge-base", "--all", *refs]
+        proc = subprocess.run(
+            cmd, cwd=self.directory, env=self.env, capture_output=True, text=True
+        )
+        if proc.returncode == 0:
+            return [Sha(x) for x in proc.stdout.strip().split()]
+        elif proc.returncode == 1 and none_ok:
+            return []
+        else:
+            raise GitFailed(f"git merge-tree failed:\n{proc.stderr}", rc=proc.returncode)
+
     @cache
     def abbrev(self, ref: Sha) -> str:
         "Return abbreviated sha for ref"
@@ -488,3 +537,73 @@ class Git:
     def temp_env(self, **kw) -> Iterator["Git"]:
         "yield a new git wrapper with a fresh environment that that is safe to mutate."
         yield type(self)(self.directory, env={**self.env, **kw})
+
+    @cache
+    def patch_id(self, sha: Sha) -> str:
+        "Return the patch-id for a commit, or None if the commit has no diff."
+        diff = self("show", "--no-notes", sha, "--", quiet=True)
+        proc = subprocess.Popen(
+            ["git", "patch-id", "--stable"],
+            cwd=self.directory,
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = proc.communicate(diff)
+        if proc.returncode != 0:
+            raise GitFailed(f"git patch-id failed:\n{stderr}", rc=proc.returncode)
+        patch_id, _ = stdout.strip().split()
+        return patch_id
+
+    def apply_patch_to_index(self, commit: Commit, *, reverse: bool = False) -> None:
+        "Apply (or reverse-apply) a commit's diff to the index"
+        if len(commit.parents) > 1:
+            raise Exception(f"commit {commit.summary} is not a patch")
+        diff = self("show", "--no-notes", commit.sha, "--", quiet=True)
+        if not diff:
+            return
+        cmd = ["git", "apply", "--cached"]
+        if reverse:
+            cmd.append("--reverse")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=self.directory,
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        _, stderr = proc.communicate(diff)
+        if proc.returncode != 0:
+            raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
+
+    def check_apply_patch_to_index(self, commit: Commit, *, reverse: bool = False) -> bool:
+        "Apply (or reverse-apply) a commit's diff to the index"
+        if len(commit.parents) > 1:
+            raise Exception(f"commit {commit.summary} is not a patch")
+        diff = self("show", "--no-notes", commit.sha, "--", quiet=True)
+        if not diff:
+            return True
+        cmd = ["git", "apply", "--cached", "--check"]
+        if reverse:
+            cmd.append("--reverse")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=self.directory,
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        _, stderr = proc.communicate(diff)
+        if proc.returncode not in [0, 1]:
+            raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
+        return proc.returncode == 0
+
+    def check_apply(self, commit: Commit, *, to: Sha, reverse: bool = False) -> bool:
+        with self.temp_index(tree=to):
+            return self.check_apply_patch_to_index(commit, reverse=reverse)
