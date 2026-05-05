@@ -105,6 +105,13 @@ class Main(continuations.Main):
             dest="refresh",
             default=True,
         )
+        rebase_parser.add_argument(
+            "--with",
+            action="append",
+            metavar="MERGE",
+            help="provide a user merge",
+            dest="user_merges",
+        )
 
         subs.add_parser(
             "tidy", help="normalize .git-queue file", description="Normalize .git-queue file."
@@ -262,6 +269,7 @@ class Main(continuations.Main):
                     force=force,
                     to_bare=args.bare,
                     refresh=getattr(args, "refresh", True),
+                    user_merges=getattr(args, "user_merges", []) or [],
                 )
 
     def check_clean(self):

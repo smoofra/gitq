@@ -373,12 +373,24 @@ class Queue:
         return bases[0]
 
     def rebase(
-        self, onto: List[Baseline] | None, force: bool, to_bare: bool | None, refresh: bool = True
+        self,
+        onto: List[Baseline] | None,
+        force: bool,
+        to_bare: bool | None,
+        refresh: bool = True,
+        user_merges: list[Sha] = [],
     ) -> None:
         if self.is_historiography:
             raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
-            Rebase(force=force, onto=onto, bare=self.bare, to_bare=to_bare, refresh=refresh).run()
+            Rebase(
+                force=force,
+                onto=onto,
+                bare=self.bare,
+                to_bare=to_bare,
+                refresh=refresh,
+                user_merges=user_merges,
+            ).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
     # tracking it, detect that.
@@ -583,6 +595,7 @@ class RebaseOne(Step):
     bare: Branch | None
     to_bare: bool | None
     refresh: bool = True
+    user_merges: List[Sha] = field(default_factory=list)
 
     def run(self):
         old_q = Queue(self.git, bare=self.bare)
@@ -607,7 +620,12 @@ class RebaseOne(Step):
 
         with RestoreConfig.from_q(old_q), EditBranch(message="git-queue rebase") as head:
             progn(
-                MergeBaselines(old_baselines=old_q.qf.baselines, qf=q.qf, bare=q.bare),
+                MergeBaselines(
+                    old_baselines=old_q.qf.baselines,
+                    qf=q.qf,
+                    bare=q.bare,
+                    user_merges=self.user_merges,
+                ),
                 FindAndPickCherries(head, old_q.qf.baselines, self.bare),
             )
 
@@ -653,6 +671,7 @@ class Rebase(Step):
     onto: None | List[Baseline] = field(default=None)
     refresh: bool = True
     force: bool = False
+    user_merges: List[Sha] = field(default_factory=list)
 
     def run(self) -> None:
         steps: List[Step] = list()
@@ -676,7 +695,13 @@ class Rebase(Step):
             return
 
         steps.append(
-            RebaseOne(onto=self.onto, bare=self.bare, to_bare=self.to_bare, refresh=self.refresh)
+            RebaseOne(
+                onto=self.onto,
+                bare=self.bare,
+                to_bare=self.to_bare,
+                refresh=self.refresh,
+                user_merges=self.user_merges,
+            )
         )
 
         with Then(steps=steps):
