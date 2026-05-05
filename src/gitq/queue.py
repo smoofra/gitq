@@ -891,6 +891,20 @@ class MergeBaselines(Step, Continuation):
                     Output.print(f"User merge {U.abbrev} is not clean and could not be ported.")
         self.user_merges = clean
 
+    def try_octopus(self, *shas: Sha) -> bool:
+        try:
+            self.git("merge", "--no-ff", *shas, "-m", self.m)
+        except GitFailed:
+            if self.git.merge_in_progress:
+                if self.git.unmerged_files() == {Queue.queuefile_name}:
+                    self.q.save_queuefile(commit_message=self.m)
+                    return True
+                self.git("merge", "--abort")
+        else:
+            self.q.save_queuefile(amend=True)
+            return True
+        return False
+
     def merge_baselines(self) -> None:
         q = self.q
 
@@ -921,34 +935,13 @@ class MergeBaselines(Step, Continuation):
                 q.save_queuefile()
             return
 
-        # try octopus merge first
-        try:
-            self.git("merge", "--no-ff", *(b.sha for b in needed), "-m", self.m)
-        except GitFailed:
-            if (self.git.gitdir / "MERGE_HEAD").exists():
-                if self.git.unmerged_files() == {q.queuefile_name}:
-                    q.save_queuefile(commit_message=self.m)
-                    return
-                self.git("merge", "--abort")
-        else:
-            q.save_queuefile(amend=True)
+        # See if octopus merge can do it.
+        if self.try_octopus(*(b.sha for b in needed)):
+            return
+        if self.user_merges and self.try_octopus(*(b.sha for b in needed), *self.user_merges):
             return
 
-        # try octopus with user merges
-        try:
-            shas = [*(b.sha for b in needed), *self.user_merges]
-            self.git("merge", "--no-ff", *(s for s in shas), "-m", self.m)
-        except GitFailed:
-            if (self.git.gitdir / "MERGE_HEAD").exists():
-                if self.git.unmerged_files() == {q.queuefile_name}:
-                    q.save_queuefile(commit_message=self.m)
-                    return
-                self.git("merge", "--abort")
-        else:
-            q.save_queuefile(amend=True)
-            return
-
-        # merge one at a time
+        # Merge one at a time
         while needed:
             baseline = needed.pop(0)
             with Heading(f"Merging {baseline.summary}"):
