@@ -402,14 +402,14 @@ class Git:
                 current = tree
         return not self.cmd_test(["git", "diff", "--quiet", commit.sha, current, "--"])
 
-    def merge_tree(self, a: str, b: str) -> Tuple[str, Set[str]]:
+    def merge_tree(self, a: str, b: str) -> Tuple[Sha, Set[str]]:
         cmd = ["git", "merge-tree", "--name-only", "--no-messages", "-z", a, b]
         p = subprocess.run(cmd, cwd=self.directory, capture_output=True, text=True, env=self.env)
         if p.returncode not in [0, 1]:
             raise GitFailed(f"git failed:\n{p.stderr}", rc=p.returncode)
         tree, *conflicts = p.stdout.rstrip("\x00").split("\x00")
         assert (p.returncode == 0) == (not conflicts)
-        return tree, set(conflicts)
+        return Sha(tree), set(conflicts)
 
     def checkout_tree(self, tree: Sha) -> None:
         "replace index and working files with the specified tree"
@@ -435,7 +435,7 @@ class Git:
         return self.cmd_test(["git", "merge-base", "--is-ancestor", ancestor, of])
 
     @cache
-    def abbrev(self, ref: str) -> str:
+    def abbrev(self, ref: Sha) -> str:
         "Return abbreviated sha for ref"
         return self.cmd(["git", "rev-parse", "--short", ref], quiet=True).strip()
 
