@@ -303,22 +303,24 @@ class Git:
         cmd = ["git", "rev-parse", "--revs-only", *args, "--"]
         return self.cmd(cmd, quiet=True).strip()
 
-    def upstream_branch(self, branch: Branch) -> Upstream | None:
+    def config(self, key: str) -> str | None:
+        cmd = ["git", "config", "get", key]
         try:
-            tracker = self.rev_parse("--symbolic-full-name", branch + "@{upstream}")
+            return self.cmd(cmd, quiet=True).strip()
         except GitFailed as e:
-            errors = [
-                "no upstream configured for branch",
-                "HEAD does not point to a branch",
-            ]
-            if any(s in str(e) for s in errors):
+            if e.rc == 1:
                 return None
             raise
-        m = re.match(r"refs/remotes/([^/]+)/(.*)", tracker)
-        assert m
-        remote, remote_branch = m.groups()
-        url = self.cmd(["git", "remote", "get-url", remote], quiet=True).strip()
-        return Upstream("refs/heads/" + remote_branch, url)
+
+    def remote_url(self, name: str) -> str:
+        return self("remote", "get-url", name, quiet=True).strip()
+
+    def upstream_branch(self, branch: Branch) -> Upstream | None:
+        remote = self.config(f"branch.{branch}.remote")
+        ref = self.config(f"branch.{branch}.merge")
+        if remote and ref:
+            return Upstream(ref, self.remote_url(remote))
+        return None
 
     def upstream_sha(self, branch: Branch) -> Sha | None:
         "return the sha of the branch's upstream, or None"
