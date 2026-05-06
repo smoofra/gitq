@@ -16,7 +16,7 @@ from gitq.git import Git as BaseGit
 from gitq.git_queue import Queue, DETECT
 
 
-__all__ = ["Git", "repo", "tmp"]
+__all__ = ["Git", "repo", "remote_repo", "tmp"]
 
 
 class Git(BaseGit):
@@ -122,6 +122,29 @@ def tmp() -> Iterator[Path]:
     else:
         with TemporaryDirectory() as t:
             yield Path(t)
+
+
+@pytest.fixture(scope="function")
+def remote_repo() -> Iterator[tuple[Git, Git]]:
+    """Returns (local, remote) git pair. local has 'origin' remote pointing to remote."""
+
+    with tmp() as t:
+        remote_path = t / "remote"
+        local_path = t / "local"
+        remote_path.mkdir()
+        local_path.mkdir()
+
+        for path in [remote_path, local_path]:
+            subprocess.run("git init -q", check=True, shell=True, cwd=path)
+            subprocess.run(
+                "git config set advice.detachedHead false", check=True, shell=True, cwd=path
+            )
+
+        remote = Git(remote_path)
+        local = Git(local_path)
+        local.s(f"git remote add origin {remote_path}")
+
+        yield local, remote
 
 
 @pytest.fixture(scope="function")

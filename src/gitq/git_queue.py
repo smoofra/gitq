@@ -112,6 +112,15 @@ class Main(continuations.Main):
             help="provide a user merge",
             dest="user_merges",
         )
+        rebase_parser.add_argument(
+            "--use-local",
+            action="store_true",
+            default=None,
+            help="use local branches tracking baseline if one exists",
+        )
+        rebase_parser.add_argument(
+            "--no-use-local", action="store_false", default=None, dest="use_local"
+        )
 
         subs.add_parser(
             "tidy", help="normalize .git-queue file", description="Normalize .git-queue file."
@@ -264,15 +273,16 @@ class Main(continuations.Main):
                         raise UserError(f"{ref} not found in baselines")
                     del onto[i]
 
-                q.rebase(
-                    RebaseOptions(
-                        onto=onto,
-                        force=force,
-                        to_bare=args.bare,
-                        refresh=getattr(args, "refresh", True),
-                        user_merges=getattr(args, "user_merges", []) or [],
-                    )
+                opts = RebaseOptions(
+                    onto=onto,
+                    force=force,
+                    to_bare=args.bare,
+                    refresh=getattr(args, "refresh", True),
+                    user_merges=getattr(args, "user_merges", []) or [],
                 )
+                if (ul := getattr(args, "use_local", None)) is not None:
+                    opts.use_local = ul
+                q.rebase(opts)
 
     def check_clean(self):
         if set(self.git.dirty_files()) == {Queue.queuefile_name}:

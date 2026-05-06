@@ -1,9 +1,10 @@
 import pytest
-from .fixtures import Git, repo
+from .fixtures import Git, repo, remote_repo
 from gitq.git import GitFailed, Sha
 from gitq.queue import Queue, RebaseOptions
 
 _ = repo
+_ = remote_repo
 
 
 def test_rebase(repo: Git):
@@ -989,3 +990,111 @@ def test_rebase_with(repo: Git):
 
     assert repo.log() == ["0", "a", "b", "resolved", "merged baselines", "1"]
     assert repo.r("x") == "ab"
+
+
+def test_use_local(remote_repo):
+    """--use-local uses local tracking branch instead of fetching from remote"""
+    local, remote = remote_repo
+
+    remote.c("0")
+    remote.s("git checkout -b base HEAD")
+    r1 = remote.sha("base")
+
+    local.s("git fetch origin")
+    local.s("git checkout -b base --track origin/base")
+    local.s(f"git checkout -b work {r1}")
+    local.s("git queue init origin/base")
+    local.c("1")
+
+    # Advance the remote — local does NOT fetch
+    remote.c("base-v2")
+
+    # --use-local: local base branch is still at r1, so baseline SHA is unchanged
+    local.s("git queue rebase --use-local")
+    assert local.q.baselines[0].sha == r1
+
+    local.s("git checkout -q base")
+    local.c("x")
+
+    local.s("git checkout -q work")
+    local.s("git queue rebase --use-local")
+    assert local.log() == ["0", "x", "baseline", "1"]
+
+
+def test_no_use_local(remote_repo):
+    """--no-use-local fetches from remote and rebases onto the new remote baseline"""
+    local, remote = remote_repo
+
+    remote.c("0")
+    remote.s("git checkout -b base HEAD")
+    r1 = remote.sha("base")
+
+    local.s("git fetch origin")
+    local.s("git checkout -b base --track origin/base")
+    local.s(f"git checkout -b work {r1}")
+    local.s("git queue init origin/base")
+    local.c("1")
+
+    # Advance the remote
+    remote.c("x")
+    r2 = remote.sha("base")
+
+    # --no-use-local: fetches from remote, baseline advances to r2
+    local.s("git queue rebase --no-use-local")
+    assert local.q.baselines[0].sha == r2
+    assert local.log() == ["0", "x", "baseline", "1"]
+
+
+def test_use_local_recursive(remote_repo):
+    local, _ = remote_repo
+
+    local.c("0")
+
+    local.s("git queue init -b A master")
+    local.c("a")
+    local.s("git push -u origin A")
+
+    local.s("git queue init -b B origin/A")
+    local.c("b")
+
+    local.s("git checkout -q master")
+    local.c("1")
+
+    local.s("git checkout -q B")
+    local.s("git queue rebase --use-local")
+
+    assert local.log() == ["0", "1", "baseline", "a", "baseline", "b"]
+
+
+def test_no_use_local_recursive(remote_repo):
+    local, remote = remote_repo
+
+    local.c("0")
+
+    local.s("git queue init -b A master")
+    local.c("a")
+    local.s("git push -u origin A")
+
+    local.s("git queue init -b B origin/A")
+    local.c("b")
+
+    local.s("git checkout -q master")
+    local.c("1")
+
+    local.s("git checkout -q B")
+    local.s("git queue rebase --no-use-local")
+    assert local.log() == ["0", "baseline", "a", "baseline", "b"]
+
+    remote.s("git checkout -q A")
+    remote.c("a2")
+
+    local.s("git checkout -q B")
+    local.s("git queue rebase --no-use-local")
+    assert local.log() == ["0", "baseline", "a", "a2", "baseline", "b"]
+
+    local.s("git checkout -q master")
+    local.c("1")  # no effect, remote queue is not rebased
+
+    local.s("git checkout -q B")
+    local.s("git queue rebase --no-use-local")
+    assert local.log() == ["0", "baseline", "a", "a2", "baseline", "b"]

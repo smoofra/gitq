@@ -35,6 +35,11 @@ class AuthorDate(NamedTuple):
     date: str
 
 
+class Upstream(NamedTuple):
+    ref: "Ref"
+    url: str
+
+
 def split_author(line: str) -> AuthorDate:
     m = re.match(r"\s*([^\<\>]+) <([^\<\>]+)> ([\d\-\+\s]+?)\s*$", line)
     assert m
@@ -285,7 +290,7 @@ class Git:
         return not proc.wait()
 
     def sha(self, ref: Ref) -> Sha:
-        return Sha(self.cmd(["git", "rev-parse", ref], quiet=True).strip())
+        return Sha(self.rev_parse(ref))
 
     def symbolic_full_name(self, commit: str) -> str | None:
         name = self.cmd(["git", "rev-parse", "--symbolic-full-name", commit], quiet=True).strip()
@@ -294,12 +299,36 @@ class Git:
     def detach(self) -> None:
         self.cmd(["git", "checkout", self.sha("HEAD")], comment="detach")
 
-    def upstream(self, branch: str) -> Sha | None:
+    def rev_parse(self, *args) -> str:
+        cmd = ["git", "rev-parse", "--revs-only", *args, "--"]
+        return self.cmd(cmd, quiet=True).strip()
+
+    def upstream_branch(self, branch: Branch) -> Upstream | None:
+        try:
+            tracker = self.rev_parse("--symbolic-full-name", branch + "@{upstream}")
+        except GitFailed as e:
+            errors = [
+                "no upstream configured for branch",
+                "HEAD does not point to a branch",
+            ]
+            if any(s in str(e) for s in errors):
+                return None
+            raise
+        m = re.match(r"refs/remotes/([^/]+)/(.*)", tracker)
+        assert m
+        remote, remote_branch = m.groups()
+        url = self.cmd(["git", "remote", "get-url", remote], quiet=True).strip()
+        return Upstream("refs/heads/" + remote_branch, url)
+
+    def upstream_sha(self, branch: Branch) -> Sha | None:
         "return the sha of the branch's upstream, or None"
         try:
             return self.sha(branch + "@{upstream}")
         except GitFailed as e:
-            errors = ["no upstream configured for branch", "HEAD does not point to a branch"]
+            errors = [
+                "no upstream configured for branch",
+                "HEAD does not point to a branch",
+            ]
             if any(s in str(e) for s in errors):
                 return None
             raise
@@ -380,7 +409,7 @@ class Git:
         else:
             return self.unique_parent(commit)
 
-    def branches(self) -> Iterator[str]:
+    def branches(self) -> Iterator[Branch]:
         for line in self.cmd(["git", "for-each-ref", "refs/heads"], quiet=True).splitlines():
             m = re.search(r"\trefs/heads/(.*?)\s*$", line)
             assert m
@@ -656,3 +685,11 @@ class Git:
         _, stderr = proc.communicate(diff)
         if proc.returncode != 0:
             raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
+
+    @cache
+    def find_local(self, ref: Ref, url: str) -> Ref | None:
+        for branch in self.branches():
+            if u := self.upstream_branch(branch):
+                if ref == u.ref and url == u.url:
+                    return "refs/heads/" + branch
+        return None

@@ -332,7 +332,7 @@ class Main(continuations.Main):
             return
 
         with self.setup():
-            upstream = self.git.upstream("HEAD")
+            upstream = self.git.upstream_sha("HEAD")
             with EditBranch(message="git-swap"):
                 if args.up:
                     self.swap_up(args)

@@ -100,6 +100,7 @@ class QueueFile(YAMLObject):
 @dataclass
 class RebaseOptions(YAMLObject):
 
+    use_local: bool = True
     to_bare: bool | None = None
     user_merges: List[Sha] = field(default_factory=list)
     force: bool = False
@@ -107,7 +108,7 @@ class RebaseOptions(YAMLObject):
     refresh: bool = True
 
     def for_recurse(self) -> "RebaseOptions":
-        return RebaseOptions()
+        return RebaseOptions(use_local=self.use_local)
 
 
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
@@ -686,9 +687,12 @@ class Rebase(Step):
         q = Queue(self.git, bare=self.bare)
         if self.opts.refresh:
             for baseline in q.qf.baselines:
-                # FIXME this is not even looking at baseline.remote, it
-                # should be looking there and also checking if there are
-                # any local queues set up to track it!
+                if baseline.remote:
+                    if self.opts.use_local:
+                        branch = self.git.find_local(baseline.ref, baseline.remote)
+                        if branch and q.needs_rebase(branch, git=self.git, opts=self.opts):
+                            steps.append(RebaseBranch(branch, self.opts.for_recurse()))
+                    continue
                 if q.needs_rebase(baseline.ref, git=self.git, opts=self.opts):
                     assert baseline.ref
                     steps.append(RebaseBranch(baseline.ref, opts=self.opts.for_recurse()))
@@ -975,10 +979,12 @@ def refresh_baseline(baseline: Baseline, *, git: Git, opts: RebaseOptions) -> Ba
     if baseline.ref is None:
         return baseline
     elif baseline.remote:
-        if baseline.ref.startswith("refs/heads/") and (remote := git.find_remote(baseline.remote)):
-            git.fetch(remote)
+        if opts.use_local and (local := git.find_local(baseline.ref, baseline.remote)):
+            fetched = local
+        elif baseline.ref.startswith("refs/heads/") and (name := git.find_remote(baseline.remote)):
+            git.fetch(name)
             branch = baseline.ref.removeprefix("refs/heads/")
-            fetched = f"refs/remotes/{remote}/{branch}"
+            fetched = f"refs/remotes/{name}/{branch}"
         else:
             git.cmd(["git", "fetch", baseline.remote, baseline.ref])
             fetched = "FETCH_HEAD"
