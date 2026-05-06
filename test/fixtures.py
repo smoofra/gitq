@@ -2,10 +2,12 @@ import sys
 import subprocess
 import textwrap
 from pathlib import Path
-from typing import List
+from typing import List, Iterator
 import os
 import shutil
 import re
+from tempfile import TemporaryDirectory
+from contextlib import contextmanager
 
 import pytest
 
@@ -13,7 +15,8 @@ from gitq.output import Output
 from gitq.git import Git as BaseGit
 from gitq.git_queue import Queue, DETECT
 
-__all__ = ["Git", "repo"]
+
+__all__ = ["Git", "repo", "tmp"]
 
 
 class Git(BaseGit):
@@ -102,28 +105,30 @@ class Git(BaseGit):
         self("commit", "--allow-empty", "-q", "-m", message)
 
 
+@contextmanager
+def tmp() -> Iterator[Path]:
+
+    if (t := os.environ.get("GITQ_TEMP")) and not os.environ.get("PYTEST_XDIST_WORKER"):
+        path = Path(t)
+        assert path.is_absolute()
+        os.makedirs(path, exist_ok=True)
+        for x in path.glob("*"):
+            if x.is_dir():
+                shutil.rmtree(x)
+            else:
+                x.unlink()
+        yield path
+
+    else:
+        with TemporaryDirectory() as t:
+            yield Path(t)
+
+
 @pytest.fixture(scope="function")
-def repo(tmp_path: Path) -> Git:
-    Output.print()
-
-    if t := os.environ.get("GIT_QUEUE_TEMP_REPO"):
-        if os.environ.get("PYTEST_XDIST_WORKER"):
-            raise RuntimeError("GIT_QUEUE_TEMP_REPO cannot be used with parallel tests")
-        tmp_path = Path(t)
-        assert tmp_path.is_absolute()
-
-    os.makedirs(tmp_path, exist_ok=True)
-
-    for x in tmp_path.glob("*"):
-        if x.is_dir():
-            shutil.rmtree(x)
-        else:
-            x.unlink()
-
-    subprocess.run("git init -q", check=True, shell=True, cwd=tmp_path)
-    subprocess.run(
-        "git config set advice.detachedHead false", check=True, shell=True, cwd=tmp_path
-    )
-
-    repo = Git(tmp_path)
-    return repo
+def repo() -> Iterator[Git]:
+    with tmp() as path:
+        subprocess.run("git init -q", check=True, shell=True, cwd=path)
+        subprocess.run(
+            "git config set advice.detachedHead false", check=True, shell=True, cwd=path
+        )
+        yield Git(path)

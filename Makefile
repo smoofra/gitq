@@ -2,7 +2,7 @@
 MAX_LINE = 99
 SOURCES = src test
 
-export GIT_QUEUE_TEMP_REPO=
+export GITQ_TEMP=
 
 .PHONY: check flake8 black black-check mypy test coverage format lint
 
