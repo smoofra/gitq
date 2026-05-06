@@ -84,6 +84,7 @@ def test_port_user_merge_rebased_baseline(repo: Git):
     # Conflict resolution is preserved
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
 
     # The new upstream commit is present in the log
     assert "1" in log
@@ -111,6 +112,7 @@ def test_port_user_merge_both_baselines_rebased(repo: Git):
 
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
 
     assert "1" in log
 
@@ -163,6 +165,9 @@ def test_port_user_merge_multiple_rebases(repo: Git):
 
         with open(repo.directory / "shared") as f:
             assert f.read().strip() == "merged"
+        assert "shared" == repo.so(
+            "git show --remerge-diff HEAD^{/resolved} --name-only --format="
+        )
 
 
 def test_port_user_merge_patch_preserved(repo: Git):
@@ -182,6 +187,7 @@ def test_port_user_merge_patch_preserved(repo: Git):
 
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
 
 
 def test_port_user_merge_insufficient(repo: Git):
@@ -290,6 +296,7 @@ def test_port_user_merge_merge_in_baseline_ancestry(repo: Git):
 
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
 
 
 def test_port_user_merge_stacked_queues(repo: Git):
@@ -364,6 +371,7 @@ def test_port_user_merge_stacked_queues(repo: Git):
     assert "d_patch" in log
     assert "1" in log
 
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
 
@@ -419,6 +427,9 @@ def test_port_user_merge_2_essential(repo: Git):
     log = repo.log()
     assert "resolved conflicts" in log
     assert "patch" in log
+    assert {"file1", "file2"} == set(
+        repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=").split()
+    )
 
     with open(repo.directory / "file1") as f:
         assert f.read().strip() == "merged1"
@@ -440,5 +451,6 @@ def test_port_user_merge_no_common_ancestor(repo: Git):
     repo.s("git checkout -q q")
     repo.s("git queue rebase")
 
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
