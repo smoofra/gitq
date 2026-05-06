@@ -60,6 +60,11 @@ class Git(BaseGit):
             f.write(textwrap.dedent(content).strip())
             f.write("\n")
 
+    def r(self, filename: str) -> str:
+        "read a file"
+        with open(self.directory / filename, "r") as f:
+            return f.read().strip()
+
     def log(self, n=None) -> List[str]:
         command = ["git", "log", "--topo-order", "--reverse", "--format=%s"]
         if n is not None:

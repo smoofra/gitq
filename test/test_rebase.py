@@ -964,3 +964,28 @@ def test_check_clean_commits_dirty_queuefile(repo: Git):
     # The queuefile commit is rebased away, but appears in the reflog
     reflog = repo.so("git log -g --format=%s")
     assert any("update .git-queue" in line for line in reflog.splitlines())
+
+
+def test_rebase_with(repo: Git):
+
+    repo.c("0")
+
+    repo.s("git checkout -b base_a -q master")
+    repo.c("a", filename="x")
+
+    repo.s("git checkout -b base_b -q master")
+    repo.c("b", filename="x")
+
+    repo.s("git checkout " + repo.rev_parse("base_a"))
+    repo.s("git merge base_b; [[ $? = 1 ]]")
+    assert repo.unmerged_files() == {"x"}
+    repo.s("echo ab>x && git add -u && git commit -m resolved")
+    merge = repo.rev_parse("HEAD")
+
+    repo.s("git queue init -b q base_a")
+    repo.c("1")
+
+    repo.s(f"git queue rebase --add base_b --with {merge}")
+
+    assert repo.log() == ["0", "a", "b", "resolved", "merged baselines", "1"]
+    assert repo.r("x") == "ab"
