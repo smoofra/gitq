@@ -690,6 +690,8 @@ class Rebase(Step):
                 if baseline.remote:
                     if self.opts.use_local:
                         branch = self.git.find_local(baseline.ref, baseline.remote)
+                        if branch == self.git.head():
+                            continue  # can happen if current branch is set to track a baseline
                         if branch and q.needs_rebase(branch, git=self.git, opts=self.opts):
                             steps.append(RebaseBranch(branch, self.opts.for_recurse()))
                     continue

@@ -1189,3 +1189,21 @@ def test_remove_stale_ambiguous(repo: Git):
     repo.c("patch")
     repo.s("git branch -D base")
     repo.s("git queue rebase --remove base", check_error="is ambiguous")
+
+
+def test_rebase_loop(remote_repo):
+    local, remote = remote_repo
+    remote.c("base-init")
+    remote.s("git checkout -b base-branch")
+    remote.c("base-work")
+    local.s("git fetch origin")
+    local.s("git checkout -b q origin/base-branch")
+    local.s("git queue init origin/base-branch")
+    local.c("patch")
+    remote.s("git checkout master")
+    remote.s("git branch -D base-branch")
+    local.s("git fetch --prune origin")
+    local.s(
+        "git queue rebase --remove refs/remotes/origin/base-branch",
+        check_error="Cannot rebase queue onto zero baselines",
+    )
