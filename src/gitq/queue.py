@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field, replace
-from typing import List, Iterator, ContextManager, Literal, Dict
+from typing import List, Iterator, ContextManager, Literal
 from io import StringIO
 from pathlib import Path
 from contextlib import contextmanager
 from functools import cached_property
-from collections import defaultdict
 import email.utils
 import os
 import re
@@ -12,7 +11,7 @@ import re
 import yaml
 
 from .output import Output
-from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch, split_author, Patch
+from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch
 from .continuations import (
     EditBranch,
     PickCherries,
@@ -790,7 +789,8 @@ class MergeBaselines(Step, Continuation):
     def port_user_merge(self, M: Commit) -> Commit | None:
         B = [b.sha for b in self.old_baselines]
         Bʹ = [b.sha for b in self.qf.baselines]
-        return port_user_merge(M, B, Bʹ, git=self.git)
+        with Heading("porting user merge " + M.summary):
+            return port_user_merge(M, B, Bʹ, git=self.git)
 
     def check_user_merges(self):
         """

@@ -181,6 +181,27 @@ class Commit(object):
         return self.sha == other.sha
 
 
+def looks_like_trailers(s: str) -> bool:
+    seen = False
+    for line in s.strip().splitlines():
+        if re.match(r"[^\s]+: ", line):
+            seen = True
+        elif re.match(r"\s", line):
+            if not seen:
+                return False
+        else:
+            return False
+    return seen
+
+
+def add_trailer(message: str, key: str, value: str):
+    message = message.rstrip()
+    i = message.rfind("\n\n")
+    if i >= 0 and looks_like_trailers(message[i + 2 :]):
+        return f"{message}\n{key}: {value}\n"
+    return f"{message}\n\n{key}: {value}\n"
+
+
 class Patch(Commit):
     "A commit treated as a patch for purposes of hashing and comparison"
 
@@ -609,5 +630,29 @@ class Git:
         return proc.returncode == 0
 
     def check_apply(self, commit: Commit, *, to: Sha, reverse: bool = False) -> bool:
-        with self.temp_index(tree=to):
-            return self.check_apply_patch_to_index(commit, reverse=reverse)
+        with self.temp_index(tree=to) as git:
+            return git.check_apply_patch_to_index(commit, reverse=reverse)
+
+    def write_tree(self) -> Sha:
+        return Sha(self.cmd(["git", "write-tree"], quiet=True).strip())
+
+    def apply_diff_to_index(self, A: Sha, B: Sha, *, reverse: bool = False) -> None:
+        "Apply (or reverse-apply) the diff between A and B to the index."
+        diff = self("diff", A, B, "--", quiet=True)
+        if not diff:
+            return
+        cmd = ["git", "apply", "--cached"]
+        if reverse:
+            cmd.append("--reverse")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=self.directory,
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        _, stderr = proc.communicate(diff)
+        if proc.returncode != 0:
+            raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)

@@ -454,3 +454,206 @@ def test_port_user_merge_no_common_ancestor(repo: Git):
     assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+
+
+def test_port_user_merge_conflicted_new_baseline(repo: Git):
+    "test porting onto a conflicted merge"
+    repo.c("0")
+
+    # base_a and base_b: distinct seed commits so queue init merges cleanly
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Init queue (no conflict yet)
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Both baselines now add a conflicting "shared" file
+    repo.s("git checkout -q base_a")
+    repo.w("shared", "version a")
+    repo.s("git add shared && git commit -qm 'a2'")
+
+    repo.s("git checkout -q base_b")
+    repo.w("shared", "version b")
+    repo.s("git add shared && git commit -qm 'b2'")
+
+    # First rebase: suspends on shared conflict → user resolves → M created
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+    repo.w("shared", "merged")
+    repo.s("git add shared")
+    repo.s("git queue continue")
+    assert "resolved conflicts" in repo.log()
+
+    # Build a new base_a whose history contains a conflicted merge (CM) on
+    # "feature_file" — unrelated to the "shared" conflict in M.
+    # sub1 and sub2 both add feature_file with different content from master.
+    repo.s("git checkout -qb sub1 master")
+    repo.w("feature_file", "sub1")
+    repo.s("git add feature_file && git commit -qm 'sub1'")
+
+    repo.s("git checkout -qb sub2 master")
+    repo.w("feature_file", "sub2")
+    repo.s("git add feature_file && git commit -qm 'sub2'")
+
+    # Merge sub2 into sub1 — add/add conflict on feature_file → CM
+    repo.s("git checkout -q sub1")
+    repo.s("git merge --no-ff sub2; [[ $? = 1 ]]")
+    assert repo.unmerged() == {"feature_file"}
+    repo.w("feature_file", "merged_feature")
+    repo.s("git add feature_file && git commit -qm 'CM: merge subs'")
+
+    # Commit shared="version a" on top of CM — same diff as old a2, same patch-id
+    repo.w("shared", "version a")
+    repo.s("git add shared && git commit -qm 'new_a2'")
+
+    # Force base_a to this new conflicted-merge history
+    repo.s("git branch -f base_a HEAD")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
+
+
+def test_port_user_merge_conflicted_baseline_below(repo: Git):
+    "test porting onto a conflicted merge"
+    repo.c("0")
+
+    # base_a and base_b: distinct seed commits so queue init merges cleanly
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Init queue (no conflict yet)
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Both baselines now add a conflicting "shared" file
+    repo.s("git checkout -q base_a")
+    repo.w("shared", "version a")
+    repo.s("git add shared && git commit -qm 'a2'")
+
+    repo.s("git checkout -q base_b")
+    repo.w("shared", "version b")
+    repo.s("git add shared && git commit -qm 'b2'")
+
+    # First rebase: suspends on shared conflict → user resolves → M created
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+    repo.w("shared", "merged")
+    repo.s("git add shared")
+    repo.s("git queue continue")
+    assert "resolved conflicts" in repo.log()
+
+    # add some random junk
+    repo.s("git checkout -q master")
+    repo.c("x")
+    repo.c("y")
+
+    # Build a new base_a whose history contains a conflicted merge (CM) on
+    # "feature_file" — unrelated to the "shared" conflict in M.
+    # sub1 and sub2 both add feature_file with different content from master.
+    repo.s("git checkout -qb sub1 master")
+    repo.w("feature_file", "sub1")
+    repo.s("git add feature_file && git commit -qm 'sub1'")
+
+    repo.s("git checkout -qb sub2 master")
+    repo.w("feature_file", "sub2")
+    repo.s("git add feature_file && git commit -qm 'sub2'")
+
+    # Merge sub2 into sub1 — add/add conflict on feature_file → CM
+    repo.s("git checkout -q sub1")
+    repo.s("git merge --no-ff sub2; [[ $? = 1 ]]")
+    assert repo.unmerged() == {"feature_file"}
+    repo.w("feature_file", "merged_feature")
+    repo.s("git add feature_file && git commit -qm 'CM: merge subs'")
+
+    # rebase base_a onto the conflicted merge history
+    repo.s("git checkout -q base_a")
+    repo.s("git rebase HEAD@{1}")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
+
+
+def test_port_user_merge_conflicted_baseline_above(repo: Git):
+    "test porting onto a conflicted merge"
+    repo.c("0")
+
+    # base_a and base_b: distinct seed commits so queue init merges cleanly
+    repo.s("git checkout -qb base_a master")
+    repo.c("a")
+    repo.s("git checkout -qb base_b master")
+    repo.c("b")
+
+    # Init queue (no conflict yet)
+    repo.s("git checkout -q master")
+    repo.s("git queue init -b q base_a base_b")
+    repo.c("patch")
+
+    # Both baselines now add a conflicting "shared" file
+    repo.s("git checkout -q base_a")
+    repo.w("shared", "version a")
+    repo.s("git add shared && git commit -qm 'a2'")
+
+    repo.s("git checkout -q base_b")
+    repo.w("shared", "version b")
+    repo.s("git add shared && git commit -qm 'b2'")
+
+    # First rebase: suspends on shared conflict → user resolves → M created
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+    repo.w("shared", "merged")
+    repo.s("git add shared")
+    repo.s("git queue continue")
+    assert "resolved conflicts" in repo.log()
+
+    # add some random junk
+    repo.s("git checkout -q master")
+    repo.c("x")
+    repo.c("y")
+    repo.s("git checkout -q base_a")
+    repo.s("git rebase master")
+
+    # Build a new base_a whose history contains a conflicted merge (CM) on
+    # "feature_file" — unrelated to the "shared" conflict in M.
+    # sub1 and sub2 both add feature_file with different content from master.
+    repo.s("git checkout -qb sub1 base_a")
+    repo.w("feature_file", "sub1")
+    repo.s("git add feature_file && git commit -qm 'sub1'")
+
+    repo.s("git checkout -qb sub2 base_a")
+    repo.w("feature_file", "sub2")
+    repo.s("git add feature_file && git commit -qm 'sub2'")
+
+    # Merge sub2 into sub1 — add/add conflict on feature_file → CM
+    repo.s("git checkout -q sub1")
+    repo.s("git merge --no-ff sub2; [[ $? = 1 ]]")
+    assert repo.unmerged() == {"feature_file"}
+    repo.w("feature_file", "merged_feature")
+    repo.s("git add feature_file && git commit -qm 'CM: merge subs'")
+
+    repo.s("git branch -f base_a HEAD")
+
+    # rebase base_a onto the conflicted merge history
+    repo.s("git checkout -q base_a")
+    repo.s("git rebase HEAD@{1}")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
