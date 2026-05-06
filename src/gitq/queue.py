@@ -97,6 +97,19 @@ class QueueFile(YAMLObject):
     commits: List[str] | None = field(default=None)
 
 
+@dataclass
+class RebaseOptions(YAMLObject):
+
+    to_bare: bool | None = None
+    user_merges: List[Sha] = field(default_factory=list)
+    force: bool = False
+    onto: List[Baseline] | None = None
+    refresh: bool = True
+
+    def for_recurse(self) -> "RebaseOptions":
+        return RebaseOptions()
+
+
 yaml.add_path_resolver("!QueueFile", [], Loader=Loader, Dumper=Dumper)
 yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=Dumper)
 
@@ -104,6 +117,7 @@ yaml.add_path_resolver("!Baseline", ["baselines", None], Loader=Loader, Dumper=D
 # These can appear in continuation files (e.g. as RebaseOne.onto), so register there too.
 Continuation.register(Baseline)
 Continuation.register(QueueFile)
+Continuation.register(RebaseOptions)
 
 CommitType = Literal["baseline", "update-queuefile"]
 
@@ -256,7 +270,9 @@ class Queue:
             else:
                 self.save_queuefile(commit_message="new queue branch")
             progn(
-                MergeBaselines(old_baselines=self.qf.baselines, qf=self.qf, bare=self.bare),
+                MergeBaselines(
+                    RebaseOptions(), old_baselines=self.qf.baselines, qf=self.qf, bare=self.bare
+                ),
                 NewBranch(branch),
             )
         else:
@@ -374,22 +390,14 @@ class Queue:
 
     def rebase(
         self,
-        onto: List[Baseline] | None,
-        force: bool,
-        to_bare: bool | None,
-        refresh: bool = True,
-        user_merges: list[Sha] = [],
+        opts: RebaseOptions,
     ) -> None:
         if self.is_historiography:
             raise UserError("Cannot rebase a historiography")
         with Heading("Rebasing queue"):
             Rebase(
-                force=force,
-                onto=onto,
+                opts,
                 bare=self.bare,
-                to_bare=to_bare,
-                refresh=refresh,
-                user_merges=user_merges,
             ).run()
 
     # TODO if baseline is a remote branch, but there is a local branch
@@ -397,7 +405,7 @@ class Queue:
 
     @classmethod
     def needs_rebase(
-        cls, ref: Ref | None, seen: frozenset[str] = frozenset(), *, git: Git
+        cls, ref: Ref | None, seen: frozenset[str] = frozenset(), *, git: Git, opts: RebaseOptions
     ) -> bool:
         "Return True if the local queue branch at ref has baselines that have been updated."
         if ref is None or not ref.startswith("refs/heads/"):
@@ -409,9 +417,9 @@ class Queue:
             return False
         seen = seen | {ref}
         for b in qf.baselines:
-            if refresh_baseline(b, git=git).sha != b.sha:
+            if refresh_baseline(b, git=git, opts=opts).sha != b.sha:
                 return True
-            if cls.needs_rebase(b.ref, seen, git=git):
+            if cls.needs_rebase(b.ref, seen, git=git, opts=opts):
                 return True
         return False
 
@@ -554,11 +562,12 @@ class RebaseBranch(Step):
     "Temporarily checkout a the specified branch and rebase it."
 
     ref: Ref
+    opts: RebaseOptions
 
     def run(self):
         with Output.heading(f"rebasing branch {self.ref}"), CheckoutBranch(self.ref):
             q = Queue(self.git, bare=DETECT)
-            Rebase(bare=q.bare, to_bare=None).run()
+            Rebase(self.opts, bare=q.bare).run()
 
 
 @contextmanager
@@ -591,40 +600,42 @@ class RestoreConfig(Continuation):
 class RebaseOne(Step):
     "Rebase a single branch (not recursive)."
 
-    onto: List[Baseline] | None
+    opts: RebaseOptions
     bare: Branch | None
-    to_bare: bool | None
-    refresh: bool = True
-    user_merges: List[Sha] = field(default_factory=list)
+    onto: List[Baseline] | None = None
 
     def run(self):
         old_q = Queue(self.git, bare=self.bare)
         q = Queue(self.git, bare=self.bare)
 
         if self.onto is None:
-            self.onto = q.qf.baselines
-        if self.refresh:
-            q.qf.baselines = [refresh_baseline(b, git=self.git) for b in self.onto]
+            if self.opts.onto is None:
+                self.onto = q.qf.baselines
+            else:
+                self.onto = self.opts.onto
+
+        if self.opts.refresh:
+            q.qf.baselines = [refresh_baseline(b, git=self.git, opts=self.opts) for b in self.onto]
         else:
             q.qf.baselines = list(self.onto)
 
-        if self.to_bare and (branch := self.git.branch()):
+        if self.opts.to_bare and (branch := self.git.branch()):
             q.bare = branch
             q.save_queuefile()
-        if self.to_bare is False:
+        if self.opts.to_bare is False:
             if q.bare:
                 self.git("config", "unset", q.qf_config_name)
             q.bare = None
 
-        old_sha = self.git.rev_parse("HEAD") if not self.refresh else None
+        old_sha = self.git.rev_parse("HEAD") if not self.opts.refresh else None
 
         with RestoreConfig.from_q(old_q), EditBranch(message="git-queue rebase") as head:
             progn(
                 MergeBaselines(
+                    self.opts,
                     old_baselines=old_q.qf.baselines,
                     qf=q.qf,
                     bare=q.bare,
-                    user_merges=self.user_merges,
                 ),
                 FindAndPickCherries(head, old_q.qf.baselines, self.bare),
             )
@@ -666,46 +677,37 @@ class Rebase(Step):
       * Then rebase the current branch
     """
 
+    opts: RebaseOptions
     bare: Branch | None
-    to_bare: bool | None
-    onto: None | List[Baseline] = field(default=None)
-    refresh: bool = True
-    force: bool = False
-    user_merges: List[Sha] = field(default_factory=list)
 
     def run(self) -> None:
         steps: List[Step] = list()
 
         q = Queue(self.git, bare=self.bare)
-        if self.refresh:
+        if self.opts.refresh:
             for baseline in q.qf.baselines:
                 # FIXME this is not even looking at baseline.remote, it
                 # should be looking there and also checking if there are
                 # any local queues set up to track it!
-                if q.needs_rebase(baseline.ref, git=self.git):
+                if q.needs_rebase(baseline.ref, git=self.git, opts=self.opts):
                     assert baseline.ref
-                    steps.append(RebaseBranch(baseline.ref))
+                    steps.append(RebaseBranch(baseline.ref, opts=self.opts.for_recurse()))
 
         if (
-            not self.force
+            not self.opts.force
             and not steps
-            and all(refresh_baseline(b, git=self.git).sha == b.sha for b in q.qf.baselines)
+            and all(
+                refresh_baseline(b, git=self.git, opts=self.opts).sha == b.sha
+                for b in q.qf.baselines
+            )
             and all(self.git.is_ancestor(b.sha) for b in q.qf.baselines)
             and q.queue_is_clean()
-            and (self.to_bare is None or (bool(self.bare) == self.to_bare))
+            and (self.opts.to_bare is None or (bool(self.bare) == self.opts.to_bare))
         ):
             Output.print("Already up to date.")
             return
 
-        steps.append(
-            RebaseOne(
-                onto=self.onto,
-                bare=self.bare,
-                to_bare=self.to_bare,
-                refresh=self.refresh,
-                user_merges=self.user_merges,
-            )
-        )
+        steps.append(RebaseOne(self.opts, bare=self.bare))
 
         with Then(steps=steps):
             pass
@@ -746,6 +748,7 @@ class MergeContinue(Continuation):
 @dataclass
 class MergeBaselines(Step, Continuation):
 
+    opts: RebaseOptions
     old_baselines: List[Baseline]
     qf: QueueFile
     bare: Branch | None
@@ -801,6 +804,7 @@ class MergeBaselines(Step, Continuation):
         if not self.find_user_merges:
             return
         self.find_user_merges = False
+        self.user_merges.extend(self.opts.user_merges)
 
         # Find user merges in HEAD
         # This is the OLD queue, before baselines have been updated
@@ -967,7 +971,7 @@ class MergeBaselines(Step, Continuation):
             raise Suspend(status=m.status)
 
 
-def refresh_baseline(baseline: Baseline, *, git: Git) -> Baseline:
+def refresh_baseline(baseline: Baseline, *, git: Git, opts: RebaseOptions) -> Baseline:
     if baseline.ref is None:
         return baseline
     elif baseline.remote:

@@ -1,7 +1,7 @@
 import pytest
 from .fixtures import Git, repo
 from gitq.git import GitFailed, Sha
-from gitq.queue import Queue
+from gitq.queue import Queue, RebaseOptions
 
 _ = repo
 
@@ -482,7 +482,9 @@ def test_needs_rebase_circular_dependency():
                 return CommitStub(sha_b)
             raise GitFailed(f"unexpected ref: {ref}", rc=1)
 
-    assert not Queue.needs_rebase("refs/heads/a", git=GitStub())  # type: ignore[arg-type]
+    assert not Queue.needs_rebase(
+        "refs/heads/a", git=GitStub(), opts=RebaseOptions()  # type: ignore[arg-type]
+    )
 
 
 def test_rebase2_cherry(repo: Git):

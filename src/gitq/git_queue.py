@@ -4,7 +4,7 @@ import argparse
 import yaml
 
 from .git import Git
-from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT, message
+from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT, message, RebaseOptions
 from .continuations import Abort, UserError, Heading, Skip
 from . import continuations
 
@@ -265,11 +265,13 @@ class Main(continuations.Main):
                     del onto[i]
 
                 q.rebase(
-                    onto=onto,
-                    force=force,
-                    to_bare=args.bare,
-                    refresh=getattr(args, "refresh", True),
-                    user_merges=getattr(args, "user_merges", []) or [],
+                    RebaseOptions(
+                        onto=onto,
+                        force=force,
+                        to_bare=args.bare,
+                        refresh=getattr(args, "refresh", True),
+                        user_merges=getattr(args, "user_merges", []) or [],
+                    )
                 )
 
     def check_clean(self):
