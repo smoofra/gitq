@@ -16,17 +16,6 @@ from gitq.git_queue import Queue, DETECT
 __all__ = ["Git", "repo"]
 
 
-# class Directory:
-
-#     path: Path
-
-#     def __init__(self, path: Path):
-#         self.path = path
-
-#     def __truediv__(self, rel: str) -> Path:
-#         return self.path / rel
-
-
 class Git(BaseGit):
 
     def __truediv__(self, rel: str) -> Path:
