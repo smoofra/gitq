@@ -109,7 +109,7 @@ class Git(BaseGit):
 def tmp() -> Iterator[Path]:
 
     if (t := os.environ.get("GITQ_TEMP")) and not os.environ.get("PYTEST_XDIST_WORKER"):
-        path = Path(t)
+        path = Path(t) / "temp"
         assert path.is_absolute()
         os.makedirs(path, exist_ok=True)
         for x in path.glob("*"):
