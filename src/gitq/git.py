@@ -284,20 +284,20 @@ class Git:
             raise GitFailed("git failed", rc=proc.wait())
         return not proc.wait()
 
-    def rev_parse(self, commit: str) -> Sha:
-        return Sha(self.cmd(["git", "rev-parse", commit], quiet=True).strip())
+    def sha(self, ref: Ref) -> Sha:
+        return Sha(self.cmd(["git", "rev-parse", ref], quiet=True).strip())
 
     def symbolic_full_name(self, commit: str) -> str | None:
         name = self.cmd(["git", "rev-parse", "--symbolic-full-name", commit], quiet=True).strip()
         return name or None
 
     def detach(self) -> None:
-        self.cmd(["git", "checkout", self.rev_parse("HEAD")], comment="detach")
+        self.cmd(["git", "checkout", self.sha("HEAD")], comment="detach")
 
     def upstream(self, branch: str) -> Sha | None:
         "return the sha of the branch's upstream, or None"
         try:
-            return self.rev_parse(branch + "@{upstream}")
+            return self.sha(branch + "@{upstream}")
         except GitFailed as e:
             errors = ["no upstream configured for branch", "HEAD does not point to a branch"]
             if any(s in str(e) for s in errors):
@@ -308,7 +308,7 @@ class Git:
         try:
             return self.cmd(["git", "symbolic-ref", "HEAD"], quiet=True).strip()
         except GitFailed:
-            return self.rev_parse("HEAD")
+            return self.sha("HEAD")
 
     def branch(self) -> Branch | None:
         head = self.head()

@@ -69,7 +69,7 @@ class Baseline(YAMLObject):
         if remote_name and self.ref.startswith("refs/heads/"):
             branch = self.ref.removeprefix("refs/heads/")
             ref = f"refs/remotes/{remote_name}/{branch}"
-            if git.rev_parse(ref) == self.sha:
+            if git.sha(ref) == self.sha:
                 ref = git.abbrev_symbolic(ref)
                 return commit.abbrev, f"({ref}) {commit.title}"
 
@@ -480,7 +480,7 @@ class Queue:
         return None
 
     def commit(self, *, message: str = "", meta_branch: str):
-        sha = self.git.rev_parse("HEAD")
+        sha = self.git.sha("HEAD")
 
         with self.git.temp_index_and_files():
             qf = replace(self.qf)
@@ -627,7 +627,7 @@ class RebaseOne(Step):
                 self.git("config", "unset", q.qf_config_name)
             q.bare = None
 
-        old_sha = self.git.rev_parse("HEAD") if not self.opts.refresh else None
+        old_sha = self.git.sha("HEAD") if not self.opts.refresh else None
 
         with RestoreConfig.from_q(old_q), EditBranch(message="git-queue rebase") as head:
             progn(
@@ -770,7 +770,7 @@ class MergeBaselines(Step, Continuation):
                 # If continued after asking the user to make a merge, pick it
                 # up and add it to the list of user merges, and go back to the
                 # commit we were at before.
-                self.user_merges.append(self.git.rev_parse("HEAD"))
+                self.user_merges.append(self.git.sha("HEAD"))
                 self.git.checkout(self.suspended_at, comment="go back")
                 self.suspended_at = None
             self.merge_baselines()
@@ -900,13 +900,13 @@ class MergeBaselines(Step, Continuation):
 
     def resolve_conflicts(self, baseline: Baseline):
 
-        head = self.git.rev_parse("HEAD")
+        head = self.git.sha("HEAD")
         to_merge = baseline.sha
 
         # Try to find a user merge that can resolve the conflict
         for u in self.user_merges:
             contains_baseline = self.git.is_ancestor(baseline.sha, of=u)
-            if self.git.rev_parse("HEAD") != head:
+            if self.git.sha("HEAD") != head:
                 self.git.checkout(head)
 
             # try to merge u

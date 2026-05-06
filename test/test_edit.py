@@ -32,7 +32,7 @@ def test_edit_middle(repo: Git):
     repo.s("git commit -q -m c")
     assert repo.log() == ["0", "b", "c"]
 
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
     repo.s("git edit :/b; [[ $? = 2 ]]")
 
     # amend the commit we checked out to
@@ -57,7 +57,7 @@ def test_edit_abort(repo: Git):
     repo.s("git add .")
     repo.s("git commit -q -m b")
 
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
     branch = repo.head()
 
     repo.s("git edit :/a; [[ $? = 2 ]]")
@@ -65,7 +65,7 @@ def test_edit_abort(repo: Git):
     # abort without making changes
     repo.s("git edit --abort")
 
-    assert repo.rev_parse("HEAD") == sha
+    assert repo.sha("HEAD") == sha
     assert repo.head() == branch
     assert repo.log() == ["0", "a", "b"]
 

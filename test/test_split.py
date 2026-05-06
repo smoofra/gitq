@@ -9,7 +9,7 @@ def test_split(repo: Git):
     repo.w("b", "b")
     repo.s("git add .")
     repo.s("git commit -q -m ab")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
     assert repo.log() == ["0", "ab"]
 
     repo.s("git split HEAD; [[ $? = 2 ]]")
@@ -41,7 +41,7 @@ def test_split_amend_message(repo: Git):
     repo.w("b", "b")
     repo.s("git add .")
     repo.s("git commit -q -m ab")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git split HEAD; [[ $? = 2 ]]")
     repo.s("git restore --staged b")
@@ -68,7 +68,7 @@ def test_split_middle(repo: Git):
     repo.w("c", "c")
     repo.s("git add .")
     repo.s("git commit -q -m c")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
     assert repo.log() == ["0", "ab", "c"]
 
     repo.s("git split :/ab; [[ $? = 2 ]]")
@@ -87,7 +87,7 @@ def test_split_abort(repo: Git):
     repo.w("b", "b")
     repo.s("git add .")
     repo.s("git commit -q -m ab")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git split HEAD; [[ $? = 2 ]]")
     repo.s("git split --abort")
@@ -102,7 +102,7 @@ def test_split_abort_after_first_continue(repo: Git):
     repo.w("b", "b")
     repo.s("git add .")
     repo.s("git commit -q -m ab")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git split HEAD; [[ $? = 2 ]]")
     repo.s("git restore --staged b")

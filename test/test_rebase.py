@@ -9,7 +9,7 @@ _ = repo
 def test_rebase(repo: Git):
     repo.c("a")
     repo.s("git branch base HEAD")
-    base0 = repo.rev_parse("HEAD")
+    base0 = repo.sha("HEAD")
 
     repo.c("b")
     repo.s("git queue init base")
@@ -17,7 +17,7 @@ def test_rebase(repo: Git):
     repo.s("git checkout -q base")
     repo.w("a", "A")
     repo.s("git commit -qa --amend -m A")
-    base1 = repo.rev_parse("HEAD")
+    base1 = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
     assert repo.log() == ["a", "b", "initialized queue"]
@@ -32,7 +32,7 @@ def test_no_refresh(repo: Git):
     "--no-refresh rebases without updating baseline SHAs or incorporating upstream changes"
     repo.c("a")
     repo.s("git branch base HEAD")
-    base0 = repo.rev_parse("HEAD")
+    base0 = repo.sha("HEAD")
 
     repo.c("b")
     repo.s("git queue init base")
@@ -44,12 +44,12 @@ def test_no_refresh(repo: Git):
     repo.s("git checkout -q master")
     assert [b.sha for b in repo.q.baselines] == [base0]
 
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
     repo.s("git queue rebase --no-refresh")
     # Baseline SHA stays at the old value — upstream changes are not incorporated
     assert [b.sha for b in repo.q.baselines] == [base0]
     assert repo.log() == ["a", "baseline", "b"]
-    assert repo.rev_parse("HEAD") != sha
+    assert repo.sha("HEAD") != sha
     repo.s(f"git diff --name-only {sha}")
 
 
@@ -60,12 +60,12 @@ def test_two_baselines(repo: Git):
     repo.s("git checkout -b a master")
     repo.w("a", "a")
     repo.s("git add a && git commit -m a")
-    a = repo.rev_parse("HEAD")
+    a = repo.sha("HEAD")
 
     repo.s("git checkout -b b master")
     repo.w("b", "b")
     repo.s("git add b && git commit -m b")
-    b = repo.rev_parse("HEAD")
+    b = repo.sha("HEAD")
 
     repo.s("git checkout -b c master")
     repo.s("git queue init a b")
@@ -79,7 +79,7 @@ def test_two_baselines(repo: Git):
     repo.s("git checkout a")
     repo.w("a", "A")
     repo.s("git commit -a  -m A")
-    A = repo.rev_parse("HEAD")
+    A = repo.sha("HEAD")
 
     repo.s("git checkout c")
     repo.s("git queue rebase")
@@ -95,7 +95,7 @@ def test_rebase_merge(repo: Git):
     repo.s("git branch base HEAD")
 
     repo.s("git queue init base")
-    q0 = repo.rev_parse("HEAD")
+    q0 = repo.sha("HEAD")
 
     repo.w("b", "b")
     repo.s("git add b && git commit -q -m b")
@@ -110,7 +110,7 @@ def test_rebase_merge(repo: Git):
     repo.s("git checkout -q base")
     repo.w("a", "A")
     repo.s("git commit -qa --amend -m A")
-    base1 = repo.rev_parse("HEAD")
+    base1 = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
     repo.s("git queue rebase")
@@ -125,13 +125,13 @@ def test_rebase_conflicted_merge(repo: Git):
     repo.c("a")
     repo.s("git branch base HEAD")
     repo.s("git queue init base")
-    q0 = repo.rev_parse("HEAD")
+    q0 = repo.sha("HEAD")
 
     repo.c("b")
 
     repo.s(f"git checkout -q {q0}")
     repo.c("b", content="B")
-    other = repo.rev_parse("HEAD")
+    other = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
 
@@ -148,13 +148,13 @@ def test_rebase_edited_merge(repo: Git):
     repo.c("a")
     repo.s("git branch base HEAD")
     repo.s("git queue init base")
-    q0 = repo.rev_parse("HEAD")
+    q0 = repo.sha("HEAD")
 
     repo.c("b")
 
     repo.s(f"git checkout -q {q0}")
     repo.c("c")
-    other = repo.rev_parse("HEAD")
+    other = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
 
@@ -178,7 +178,7 @@ def test_rebase_skip(repo: Git):
     repo.s("git checkout -q base")
 
     repo.c("B", filename="b")
-    base1 = repo.rev_parse("HEAD")
+    base1 = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
     repo.s("git queue rebase; [[ $? = 2 ]]")
@@ -206,10 +206,10 @@ def test_rebase_conflict(repo: Git, case):
     repo.w("c", "")
     repo.s("git add a b c")
     repo.s("git commit -a --amend -m A -q")
-    base1 = repo.rev_parse("HEAD")
+    base1 = repo.sha("HEAD")
 
     repo.s("git checkout -q master")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git queue rebase; [[ $? = 2 ]]")
     assert repo.unmerged() == {"b"}
@@ -228,7 +228,7 @@ def test_rebase_conflict(repo: Git, case):
         repo.s("git edit --continue")
     else:
         repo.s("git edit --abort")
-        assert repo.rev_parse("HEAD") == sha
+        assert repo.sha("HEAD") == sha
         assert repo.head() == "refs/heads/master"
         return
 
@@ -550,7 +550,7 @@ def test_rebase_independent_baselines(repo: Git):
     # branch_a
     repo.s("git checkout -b branch_a")
     repo.c("a")
-    sha_a = repo.rev_parse("HEAD")
+    sha_a = repo.sha("HEAD")
     repo.s("git commit --allow-empty -m $'baseline\\n\\nTool: gitq'")
     repo.c("patch_a")
 
@@ -558,7 +558,7 @@ def test_rebase_independent_baselines(repo: Git):
     repo.s("git checkout master")
     repo.s("git checkout -b branch_b")
     repo.c("b")
-    sha_b = repo.rev_parse("HEAD")
+    sha_b = repo.sha("HEAD")
     repo.s("git commit --allow-empty -m $'baseline\\n\\nTool: gitq'")
     repo.c("patch_b")
 
@@ -905,12 +905,12 @@ def test_bare(repo: Git):
     assert repo.log() == ["a", "b", "p", "q"]
 
     base = repo.so("git config branch.queue.git-queue | awk '/sha/ {print $3}'")
-    assert repo.rev_parse("base") == base
-    sha = repo.rev_parse("HEAD")
+    assert repo.sha("base") == base
+    sha = repo.sha("HEAD")
 
     repo.s("git queue rebase")
     assert repo.log() == ["a", "b", "p", "q"]
-    assert sha == repo.rev_parse("HEAD")  # "Already up to date"
+    assert sha == repo.sha("HEAD")  # "Already up to date"
 
     repo.s("git queue rebase --no-bare")
     assert repo.log() == ["a", "b", "baseline", "p", "q"]
@@ -937,10 +937,10 @@ def test_bare(repo: Git):
     assert repo.log() == ["a", "b", "z", "merged baselines", "p", "q"]
     repo.s("! test -f .git-queue")
     repo.s("git config get branch.queue.git-queue")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git queue rebase")
-    assert sha == repo.rev_parse("HEAD")  # Already up to date
+    assert sha == repo.sha("HEAD")  # Already up to date
 
     repo.s("git checkout -b queue2 -q base")
     repo.c("r")
@@ -976,11 +976,11 @@ def test_rebase_with(repo: Git):
     repo.s("git checkout -b base_b -q master")
     repo.c("b", filename="x")
 
-    repo.s("git checkout " + repo.rev_parse("base_a"))
+    repo.s("git checkout " + repo.sha("base_a"))
     repo.s("git merge base_b; [[ $? = 1 ]]")
     assert repo.unmerged_files() == {"x"}
     repo.s("echo ab>x && git add -u && git commit -m resolved")
-    merge = repo.rev_parse("HEAD")
+    merge = repo.sha("HEAD")
 
     repo.s("git queue init -b q base_a")
     repo.c("1")

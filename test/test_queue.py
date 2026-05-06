@@ -59,7 +59,7 @@ def test_tidy(repo: Git):
     repo.s("git queue init -b q base")
     repo.c("patch1")
 
-    base_sha = repo.rev_parse("refs/heads/base")
+    base_sha = repo.sha("refs/heads/base")
 
     # Overwrite the queuefile with valid but non-normalized YAML
     # After tidy the content should be re-serialized using the custom Dumper.
@@ -135,7 +135,7 @@ def test_edit(repo: Git):
     repo.s("git queue init base")
     repo.s("git queue rebase")
 
-    q_sha = repo.rev_parse("HEAD")
+    q_sha = repo.sha("HEAD")
 
     repo.s("git queue commit -m 1 -b mq")
 
@@ -143,7 +143,7 @@ def test_edit(repo: Git):
     repo.s("git checkout -q mq")
     repo.s("git queue edit")
     assert repo.branch() == "q"
-    assert repo.rev_parse("HEAD") == q_sha
+    assert repo.sha("HEAD") == q_sha
     assert repo("config", "branch.q.gitq-historiography").strip() == "refs/heads/mq"
 
     # edit with explicit --branch creates the queue branch and links config
@@ -151,18 +151,18 @@ def test_edit(repo: Git):
     repo.s("git branch -D q")
     repo.s("git queue edit -b q2")
     assert repo.branch() == "q2"
-    assert repo.rev_parse("HEAD") == q_sha
+    assert repo.sha("HEAD") == q_sha
     assert repo("config", "branch.q2.gitq-historiography").strip() == "refs/heads/mq"
 
     repo.c("c")
     repo.s("git queue commit -m 2")
-    q_sha2 = repo.rev_parse("HEAD")
+    q_sha2 = repo.sha("HEAD")
 
     # edit without --branch finds the queue branch `q2`
     repo.s("git checkout -q mq")
     repo.s("git queue edit")
     assert repo.branch() == "q2"
-    assert repo.rev_parse("HEAD") == q_sha2
+    assert repo.sha("HEAD") == q_sha2
 
     # edit without --branch finds the queue branch `q2`
     repo.s("git checkout -q mq")
@@ -170,7 +170,7 @@ def test_edit(repo: Git):
     repo.s("git queue edit", check_error="No queue branch found")
     repo.s("git queue edit -b q3")
     assert repo.branch() == "q3"
-    assert repo.rev_parse("HEAD") == q_sha2
+    assert repo.sha("HEAD") == q_sha2
 
     repo.s("git checkout -q q3")
     repo.c("x")

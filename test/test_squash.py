@@ -9,7 +9,7 @@ def test_squash(repo: Git):
         repo.w(c, c)
         repo.s("git add .")
         repo.s(f"git commit -q -m {c}")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("EDITOR=true git squash HEAD")
     assert "".join(repo.log()) == "abcd"
@@ -26,7 +26,7 @@ def test_fixup(repo: Git):
         repo.w(c, c)
         repo.s("git add .")
         repo.s(f"git commit -q -m {c}")
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git squash --fixup HEAD")
     assert "".join(repo.log()) == "abcd"
@@ -46,7 +46,7 @@ def test_squash_deleted(repo: Git):
     repo.s("echo d >d && git add d && git commit -m d")
 
     assert "".join(repo.log()) == "abcBd"
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("EDITOR=true git squash :/B")
     assert "".join(repo.log()) == "abcd"
@@ -68,7 +68,7 @@ def test_fixup_deleted(repo: Git):
     repo.s("echo d >d && git add d && git commit -m d")
 
     assert "".join(repo.log()) == "abcBd"
-    sha = repo.rev_parse("HEAD")
+    sha = repo.sha("HEAD")
 
     repo.s("git squash --fixup :/B")
     assert "".join(repo.log()) == "abcd"

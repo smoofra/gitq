@@ -12,7 +12,7 @@ from . import continuations
 def parse_baseline(ref: str, *, git: Git) -> Baseline:
     "create a new baseline from user-provided string"
     url = None
-    sha = git.rev_parse(ref)
+    sha = git.sha(ref)
     full_name = git.symbolic_full_name(ref)
     if m := re.match(r"refs/remotes/(\w+)/(.*)", full_name or ""):
         remote, branch = m.groups()
@@ -216,7 +216,7 @@ class Main(continuations.Main):
                     )
             sha = q.recreate_queue()
             if self.git.branch_exists(queue_branch):
-                if self.git.rev_parse("refs/heads/" + queue_branch) != sha:
+                if self.git.sha("refs/heads/" + queue_branch) != sha:
                     raise UserError(f"{queue_branch} has diverged from {current_branch}")
             else:
                 self.git.cmd(["git", "update-ref", f"refs/heads/{queue_branch}", sha])
