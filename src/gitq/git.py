@@ -149,7 +149,10 @@ class Commit(object):
         return self.message.split("\n", 1)[0]
 
     def __str__(self) -> str:
-        return self.sha[:10]
+        return self.summary
+
+    def __repr__(self) -> str:
+        return self.summary
 
     def make_patch_file(self, directory: Path, *, index: Tuple[int, int] | None = None) -> Path:
         format = (
