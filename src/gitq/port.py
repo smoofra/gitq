@@ -1,12 +1,36 @@
-from typing import List, Dict
+from typing import (
+    List,
+    Dict,
+    NamedTuple,
+    Iterator,
+    Iterable,
+    TypeVar,
+    Callable,
+    ParamSpec,
+    Concatenate,
+)
 from collections import defaultdict
-from typing import NamedTuple
 
 from .git import Commit, Patch, Sha, GitFailed, split_author, Git, add_trailer
 from .output import Output
 from .continuations import Heading
 
 Merge = Commit
+
+S = TypeVar("S")
+T = TypeVar("T")
+P = ParamSpec("P")
+
+
+def bind(
+    fn: Callable[Concatenate[S, P], Iterator[T]],
+) -> Callable[Concatenate[Iterable[S], P], Iterator[T]]:
+
+    def lifted(states: Iterable[S], /, *args: P.args, **kwargs: P.kwargs) -> Iterator[T]:
+        for state in states:
+            yield from fn(state, *args, **kwargs)
+
+    return lifted
 
 
 class State(NamedTuple):
@@ -122,11 +146,10 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             S.add(commit)
             commits[commit.sha] = commit
 
-    def apply(state: State | None, head: Patch | Merge, *, reverse: bool = False) -> State | None:
-        if state is None:
-            return None
+    def apply(state: State, head: Patch | Merge, *, reverse: bool = False) -> Iterator[State]:
         if (not reverse) == (head in state.left):
-            return state  # already applied
+            yield state  # already applied
+            return
 
         if not git.is_conflicted(head):
             if isinstance(head, Patch):
@@ -137,16 +160,16 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
                         git2.apply_patch_to_index(head, reverse=reverse)
                     except GitFailed:
                         Output.print("Failed.")
-                        return None
-                    state = state.add(head, tree=git2.write_tree(), reverse=reverse)
+                        return
+                    yield state.add(head, tree=git2.write_tree(), reverse=reverse)
             else:
-                state = state.add(head, reverse=reverse)
-            return state
+                yield state.add(head, reverse=reverse)
+            return
 
         mb = git.all_merge_bases(*head.parents, none_ok=True)
         if len(mb) > 1:
             Output.print("Can't handle multi-merge-base:", head.summary)
-            return None
+            return
 
         for order in head.parents, reversed(head.parents):
             X, Y = (commits[sha] for sha in order)
@@ -160,48 +183,45 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
                     Output.print(f"Revert [{Y.summary}]..[{head.summary}]")
                     try:
                         git2.apply_diff_to_index(Y.sha, head.sha, reverse=True)
-                        s = update_history(state, git2.write_tree(), head, X, mb=mb, reverse=True)
+                        yield update_history(
+                            state, git2.write_tree(), head, X, mb=mb, reverse=True
+                        )
                     except GitFailed:
                         Output.print("Failed.")
                         continue
-                    return s  # this could return multiple correct answers.. switch to List monad?
 
             else:
                 with Heading(f"Applying merge ({side} first) {head.summary}"):
-                    if (s1 := apply_history(state, X, mb=mb)) and (
-                        s2 := apply_history(s1, Y, reverse=True, mb=mb)
-                    ):
-                        with git.temp_index(s2.tree) as git2:
-                            try:
-                                Output.print(f"Apply [{X.summary}]..[{head.summary}]")
-                                git2.apply_diff_to_index(X.sha, head.sha)
-                                return update_history(s2, git2.write_tree(), head, Y, mb=mb)
-                            except GitFailed:
-                                Output.print("Failed.")
-                                continue
+                    for s1 in apply_history(state, X, mb=mb):
+                        for s2 in apply_history(s1, Y, reverse=True, mb=mb):
+                            with git.temp_index(s2.tree) as git2:
+                                try:
+                                    Output.print(f"Apply [{X.summary}]..[{head.summary}]")
+                                    git2.apply_diff_to_index(X.sha, head.sha)
+                                    yield update_history(s2, git2.write_tree(), head, Y, mb=mb)
+                                except GitFailed:
+                                    Output.print("Failed.")
+                                    continue
 
-        return None
-
-    def apply_parents(state: State | None, head: Commit, mb: list[Sha], reverse: bool = False):
-        if state is None:
-            return None
+    def apply_parents(
+        state: State, head: Commit, mb: list[Sha], reverse: bool = False
+    ) -> Iterable[State]:
+        states: Iterable[State] = [state]
         for sha in head.parents:
             if parent := commits.get(sha):
-                state = apply_history(state, parent, reverse=reverse, mb=mb)
-        return state
+                states = bind(apply_history)(states, parent, mb=mb, reverse=reverse)
+        return states
 
     def update_history(
-        state: State | None,
+        state: State,
         tree: Sha,
         merge: Merge,
         parent: Patch | Merge,
         *,
         mb: list[Sha],
         reverse: bool = False,
-    ) -> State | None:
+    ) -> State:
         "Update state to reflect that mb..parent and merge have been applied, or reverted."
-        if state is None:
-            return None
         state = state.add(merge, tree=tree, reverse=reverse)
         todo: list[Sha] = [parent.sha]
         while todo:
@@ -212,64 +232,63 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
         return state
 
     def apply_history(
-        state: State | None, head: Patch | Merge, *, mb: list[Sha] = [], reverse: bool = False
-    ) -> State | None:
-        if state is None:
-            return None
+        state: State, head: Patch | Merge, *, mb: list[Sha] = [], reverse: bool = False
+    ) -> Iterator[State]:
         if head.sha in mb:
-            return state
+            yield state
+            return
 
         # In order to have the best chance of avoiding commutation failures,
         # apply patches in forward order but revert them in backwards order.
 
         if not git.is_conflicted(head):
             if reverse:
-                state = apply(state, head, reverse=True)
-                state = apply_parents(state, head, mb=mb, reverse=True)
+                for state in apply(state, head, reverse=True):
+                    for state in apply_parents(state, head, mb=mb, reverse=True):
+                        yield state
             else:
-                state = apply_parents(state, head, mb=mb)
-                state = apply(state, head)
-            return state
+                for state in apply_parents(state, head, mb=mb):
+                    for state in apply(state, head):
+                        yield state
+            return
 
         if len(head.parents) != 2:
             Output.print("Can't handle conflicted octopus:", head.summary)
-            return None
+            return
 
         old_mb = mb
         mb = git.all_merge_bases(*head.parents, none_ok=True)
         if len(mb) > 1:
             Output.print("Can't handle multi-merge-base:", head.summary)
-            return None
+            return
 
         if reverse:
-            state = apply(state, head, reverse=True)
-            if mb and (base := commits.get(mb[0])):
-                state = apply_history(state, base, mb=old_mb, reverse=True)
+            for state in apply(state, head, reverse=True):
+                if mb and (base := commits.get(mb[0])):
+                    yield from apply_history(state, base, mb=old_mb, reverse=True)
+                else:
+                    yield state
         else:
             if mb and (base := commits.get(mb[0])):
-                state = apply_history(state, base, mb=old_mb)
-            state = apply(state, head)
+                for state in apply_history(state, base, mb=old_mb):
+                    yield from apply(state, head)
+            else:
+                yield from apply(state, head)
 
-        return state
+    def i() -> Iterator[State]:
+        states: Iterable[State] = [State(M.tree, frozenset(left))]
+        for commit in left_topo[1:]:
+            if commit not in right:
+                states = bind(apply)(states, commit, reverse=True)
+        for sha in new_parents:
+            states = bind(apply_history)(states, commits[sha])
+        return iter(states)
 
-    state: State | None = State(M.tree, frozenset(left))
-
-    # Revert any commits from the left side that do not occur in the right
-    for commit in left_topo[1:]:
-        if commit not in right:
-            state = apply(state, commit, reverse=True)
-            if state is None:
-                Output.print("Failed to revert", commit.summary)
-                return None
-
-    # Apply all commits on the right that do not occur on the left
-    for sha in new_parents:
-        state = apply_history(state, commits[sha])
-        if state is None:
-            Output.print("Failed to apply", commits[sha].summary)
-            return None
-
-    assert state is not None and state.left == right
+    for state in i():
+        assert state.left == right
+        break
+    else:
+        return None
 
     # Create the ported merge commit, preserving the original author
     author = split_author(M.author)
