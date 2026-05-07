@@ -13,6 +13,12 @@ class State(NamedTuple):
     tree: Sha
     left: frozenset[Patch | Merge]
 
+    def add(self, c: Patch | Merge, *, reverse: bool = True, tree: Sha | None = None) -> "State":
+        if reverse:
+            return State(tree or self.tree, self.left - {c})
+        else:
+            return State(tree or self.tree, self.left | {c})
+
 
 def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Commit | None:
     """
@@ -35,25 +41,45 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
     """
 
     # Common ancestor of all old and new baselines
-    mb = [f"^{s}" for s in git.all_merge_bases(*B, *Bʹ, none_ok=True)]
+    mb = [f"^{s}^@" for s in git.all_merge_bases(*B, *Bʹ, none_ok=True)]
     if len(mb) > 1:
+        Output.print("Can't handle multiple merge bases")
         return None  # patching code below assumes single point of divergence
 
     new_parents: List[Sha] = []
     for A in M.parents:
         # Bʹ..A: patches in A not yet in any new baseline (used for essentialness)
-        patches = git.patches_and_merges(A, *(f"^{sha}" for sha in Bʹ))
-        if not patches:
+        A_commits = git.patches_and_merges(A, *(f"^{sha}" for sha in Bʹ))
+        commits: dict[Sha, Patch | Merge] = {c.sha: c for c in A_commits}
+        if not A_commits:
             new_parents.append(A)  # A is already within the new baselines — keep it as-is
             continue
 
         # Determine which patches are essential: cannot be reverted from both A and M.
         essential_patch_ids: set[str] = set()
+        todo: List[Patch | Merge] = [A_commits[0]]
+        seen: set[Sha] = set()
         with git.temp_index(tree=M.sha) as gitM, git.temp_index(tree=A) as gitA:
-            for commit in patches:
+            while todo:
+                commit = todo.pop()
+                if commit.sha in seen:
+                    continue
+                seen.add(commit.sha)
                 if not isinstance(commit, Patch):
                     if not git.is_conflicted(commit):
+                        todo.extend(commits[sha] for sha in commit.parents if sha in commits)
                         continue
+                    if base := git.merge_base(*commit.parents):
+                        # try to back out both sides together
+                        if gitA.check_apply_diff_to_index(
+                            base, commit.sha, reverse=True
+                        ) and gitM.check_apply_diff_to_index(base, commit.sha, reverse=True):
+                            gitA.apply_diff_to_index(base, commit.sha, reverse=True)
+                            gitM.apply_diff_to_index(base, commit.sha, reverse=True)
+                            if base in commits:
+                                todo.append(commits[base])
+                            continue
+                    Output.print("Can't handle conflict", commit.summary)
                     return None  # TODO handle stacked user merges
                 if not (
                     gitA.check_apply_patch_to_index(commit, reverse=True)
@@ -63,7 +89,9 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
                 else:
                     gitA.apply_patch_to_index(commit, reverse=True)
                     gitM.apply_patch_to_index(commit, reverse=True)
+                todo.extend(commits[sha] for sha in commit.parents if sha in commits)
             if not essential_patch_ids:
+                Output.print("Found no essential patches for", A_commits[0].summary)
                 return None
 
         # Find Aʹ, the first commit in Bʹ with all the essential patches in A
@@ -78,12 +106,13 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
                 Aʹ = commit.sha
                 break
         else:
+            Output.print("Failed to find Aʹ for", A_commits[0].summary)
             return None
 
         new_parents.append(Aʹ)
 
     # Read all the commits on both sides
-    commits: dict[Sha, Patch | Merge] = dict()
+    commits = dict()
     left: set[Patch | Merge] = set()
     right: set[Patch | Merge] = set()
     left_topo = git.patches_and_merges(*M.parents, *mb)
@@ -93,34 +122,96 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             S.add(commit)
             commits[commit.sha] = commit
 
-    def apply_patch(state: State | None, patch: Patch, *, reverse: bool = False) -> State | None:
+    def apply(state: State | None, head: Patch | Merge, *, reverse: bool = False) -> State | None:
         if state is None:
             return None
-        with git.temp_index(tree=state.tree) as git2:
-            verb = "Revert" if reverse else "Apply"
-            Output.print(verb, patch.summary)
-            try:
-                git2.apply_patch_to_index(patch, reverse=reverse)
-            except GitFailed:
-                Output.print("Failed.")
-                return None
-            L = state.left - {patch} if reverse else state.left | {patch}
-            return State(git2.write_tree(), L)
+        if (not reverse) == (head in state.left):
+            return state  # already applied
 
-    def add_history_parents(
-        state: State | None, head: Commit, mb: list[Sha], reverse: bool = False
-    ):
+        if not git.is_conflicted(head):
+            if isinstance(head, Patch):
+                with git.temp_index(tree=state.tree) as git2:
+                    verb = "Revert" if reverse else "Apply"
+                    Output.print(verb, head.summary)
+                    try:
+                        git2.apply_patch_to_index(head, reverse=reverse)
+                    except GitFailed:
+                        Output.print("Failed.")
+                        return None
+                    state = state.add(head, tree=git2.write_tree(), reverse=reverse)
+            else:
+                state = state.add(head, reverse=reverse)
+            return state
+
+        mb = git.all_merge_bases(*head.parents, none_ok=True)
+        if len(mb) > 1:
+            Output.print("Can't handle multi-merge-base:", head.summary)
+            return None
+
+        for order in head.parents, reversed(head.parents):
+            X, Y = (commits[sha] for sha in order)
+            side = "left" if order is head.parents else "right"
+
+            if reverse:
+                with (
+                    Heading(f"Reverting merge ({side} first) {head.summary}"),
+                    git.temp_index(state.tree) as git2,
+                ):
+                    Output.print(f"Revert [{Y.summary}]..[{head.summary}]")
+                    try:
+                        git2.apply_diff_to_index(Y.sha, head.sha, reverse=True)
+                        s = update_history(state, git2.write_tree(), head, X, mb=mb, reverse=True)
+                    except GitFailed:
+                        Output.print("Failed.")
+                        continue
+                    return s  # this could return multiple correct answers.. switch to List monad?
+
+            else:
+                with Heading(f"Applying merge ({side} first) {head.summary}"):
+                    if (s1 := apply_history(state, X, mb=mb)) and (
+                        s2 := apply_history(s1, Y, reverse=True, mb=mb)
+                    ):
+                        with git.temp_index(s2.tree) as git2:
+                            try:
+                                Output.print(f"Apply [{X.summary}]..[{head.summary}]")
+                                git2.apply_diff_to_index(X.sha, head.sha)
+                                return update_history(s2, git2.write_tree(), head, Y, mb=mb)
+                            except GitFailed:
+                                Output.print("Failed.")
+                                continue
+
+        return None
+
+    def apply_parents(state: State | None, head: Commit, mb: list[Sha], reverse: bool = False):
         if state is None:
             return None
         for sha in head.parents:
             if parent := commits.get(sha):
-                if s := add_history(state, parent, reverse=reverse, mb=mb):
-                    state = s
-                else:
-                    return None
+                state = apply_history(state, parent, reverse=reverse, mb=mb)
         return state
 
-    def add_history(
+    def update_history(
+        state: State | None,
+        tree: Sha,
+        merge: Merge,
+        parent: Patch | Merge,
+        *,
+        mb: list[Sha],
+        reverse: bool = False,
+    ) -> State | None:
+        "Update state to reflect that mb..parent and merge have been applied, or reverted."
+        if state is None:
+            return None
+        state = state.add(merge, tree=tree, reverse=reverse)
+        todo: list[Sha] = [parent.sha]
+        while todo:
+            sha = todo.pop()
+            if sha not in mb and (commit := commits.get(sha)):
+                state = state.add(commit, reverse=reverse)
+                todo.extend(commit.parents)
+        return state
+
+    def apply_history(
         state: State | None, head: Patch | Merge, *, mb: list[Sha] = [], reverse: bool = False
     ) -> State | None:
         if state is None:
@@ -128,17 +219,16 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
         if head.sha in mb:
             return state
 
+        # In order to have the best chance of avoiding commutation failures,
+        # apply patches in forward order but revert them in backwards order.
+
         if not git.is_conflicted(head):
-            # In order to have the best chance of avoiding commutation failures,
-            # apply patches in forward order but revert them in backwards order.
             if reverse:
-                if isinstance(head, Patch) and state and head in state.left:
-                    state = apply_patch(state, head, reverse=True)
-                state = add_history_parents(state, head, mb=mb, reverse=True)
+                state = apply(state, head, reverse=True)
+                state = apply_parents(state, head, mb=mb, reverse=True)
             else:
-                state = add_history_parents(state, head, mb=mb)
-                if isinstance(head, Patch) and state and head not in state.left:
-                    state = apply_patch(state, head)
+                state = apply_parents(state, head, mb=mb)
+                state = apply(state, head)
             return state
 
         if len(head.parents) != 2:
@@ -151,63 +241,35 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             Output.print("Can't handle multi-merge-base:", head.summary)
             return None
 
-        if mb and not reverse and (base := commits.get(mb[0])):
-            state = add_history(state, base, mb=old_mb)
-            if not state:
-                Output.print("Failed to apply history at", base.summary)
-                return None
-
-        for order in head.parents, reversed(head.parents):
-            X, Y = (commits[sha] for sha in order)
-            verb = "Reverting" if reverse else "Applying"
-            side = "left" if order is head.parents else "right"
-            with Heading(f"{verb} merge ({side} first) {M.summary}"):
-                if (s1 := add_history(state, X, mb=mb)) and (
-                    s2 := add_history(s1, Y, reverse=True, mb=mb)
-                ):
-                    with git.temp_index(s2.tree) as git2:
-                        try:
-                            if reverse:
-                                Output.print(f"Revert [{Y.summary}]..[{head.summary}]")
-                                git2.apply_diff_to_index(Y.sha, head.sha, reverse=True)
-                                state = State(git2.write_tree(), s2.left - {head})
-                            else:
-                                Output.print(f"Apply [{X.summary}]..[{head.summary}]")
-                                git2.apply_diff_to_index(X.sha, head.sha)
-                                state = State(git2.write_tree(), s2.left | {head})
-                            break
-                        except GitFailed:
-                            Output.print("Failed.")
-                            continue
+        if reverse:
+            state = apply(state, head, reverse=True)
+            if mb and (base := commits.get(mb[0])):
+                state = apply_history(state, base, mb=old_mb, reverse=True)
         else:
-            return None
-
-        if mb and reverse and (base := commits.get(mb[0])):
-            state = add_history(state, base, mb=old_mb, reverse=True)
-            if not state:
-                Output.print("Failed to apply history at", base.summary)
-                return None
+            if mb and (base := commits.get(mb[0])):
+                state = apply_history(state, base, mb=old_mb)
+            state = apply(state, head)
 
         return state
 
     state: State | None = State(M.tree, frozenset(left))
 
-    # Remove any patches from the left side that do not occur on the right side
-    for commit in left_topo:
-        if commit in right:
-            continue
-        if git.is_conflicted(commit):
-            return None  # TODO handle stacked user merges
-        if not isinstance(commit, Patch):
-            continue
-        state = apply_patch(state, commit, reverse=True)
+    # Revert any commits from the left side that do not occur in the right
+    for commit in left_topo[1:]:
+        if commit not in right:
+            state = apply(state, commit, reverse=True)
+            if state is None:
+                Output.print("Failed to revert", commit.summary)
+                return None
 
-    # Add any history, including merges, on the right side that doesn't occur on the left
+    # Apply all commits on the right that do not occur on the left
     for sha in new_parents:
-        state = add_history(state, commits[sha])
+        state = apply_history(state, commits[sha])
+        if state is None:
+            Output.print("Failed to apply", commits[sha].summary)
+            return None
 
-    if state is None:
-        return None
+    assert state is not None and state.left == right
 
     # Create the ported merge commit, preserving the original author
     author = split_author(M.author)

@@ -527,7 +527,7 @@ class Git:
         return self.cmd_test(["git", "merge-base", "--is-ancestor", ancestor, of])
 
     def all_merge_bases(self, *refs: Sha, none_ok: bool = False) -> List[Sha]:
-        cmd = ["git", "merge-base", "--all", *refs]
+        cmd = ["git", "merge-base", "--octopus", "--all", *refs]
         proc = subprocess.run(
             cmd, cwd=self.directory, env=self.env, capture_output=True, text=True
         )
@@ -537,6 +537,12 @@ class Git:
             return []
         else:
             raise GitFailed(f"git merge-tree failed:\n{proc.stderr}", rc=proc.returncode)
+
+    def merge_base(self, *refs: Sha) -> Sha | None:
+        mb = self.all_merge_bases(*refs, none_ok=True)
+        if len(mb) == 1:
+            return mb[0]
+        return None
 
     def independent(self, *shas: Sha) -> List[Sha]:
         out = self("merge-base", "--independent", *shas, quiet=True)
@@ -640,7 +646,7 @@ class Git:
             raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
 
     def check_apply_patch_to_index(self, commit: Commit, *, reverse: bool = False) -> bool:
-        "Apply (or reverse-apply) a commit's diff to the index"
+        "Check if commit can be applied (or reverted) to the index"
         if len(commit.parents) > 1:
             raise Exception(f"commit {commit.summary} is not a patch")
         diff = self("show", "--no-notes", commit.sha, "--", quiet=True)
@@ -690,6 +696,28 @@ class Git:
         _, stderr = proc.communicate(diff)
         if proc.returncode != 0:
             raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
+
+    def check_apply_diff_to_index(self, A: Sha, B: Sha, *, reverse: bool = False) -> bool:
+        "Check if the diff between A and B can be applied (or reverted) to the index"
+        diff = self("diff", A, B, "--", quiet=True)
+        if not diff:
+            return True
+        cmd = ["git", "apply", "--cached", "--check"]
+        if reverse:
+            cmd.append("--reverse")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=self.directory,
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        _, stderr = proc.communicate(diff)
+        if proc.returncode not in [0, 1]:
+            raise GitFailed(f"git apply failed\n{stderr}", rc=proc.returncode)
+        return proc.returncode == 0
 
     @cache
     def find_local(self, ref: Ref, url: str) -> Ref | None:

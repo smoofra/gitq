@@ -430,7 +430,17 @@ def test_port_user_merge_2_essential(repo: Git):
     assert {"file1", "file2"} == set(
         repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=").split()
     )
+    with open(repo.directory / "file1") as f:
+        assert f.read().strip() == "merged1"
+    with open(repo.directory / "file2") as f:
+        assert f.read().strip() == "merged2"
 
+    # reset base_a back to its original state and port back again
+    repo.s("git branch -f base_a base_a@{1}")
+    repo.s("git queue rebase")
+    assert {"file1", "file2"} == set(
+        repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=").split()
+    )
     with open(repo.directory / "file1") as f:
         assert f.read().strip() == "merged1"
     with open(repo.directory / "file2") as f:
@@ -520,6 +530,13 @@ def test_port_user_merge_conflicted_new_baseline(repo: Git):
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
 
+    # reset base_a back to its original state and port back again
+    repo.s("git branch -f base_a base_a@{1}")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
+
 
 def test_port_user_merge_conflicted_baseline_below(repo: Git):
     "test porting onto a conflicted merge"
@@ -582,6 +599,13 @@ def test_port_user_merge_conflicted_baseline_below(repo: Git):
     repo.s("git rebase HEAD@{1}")
 
     repo.s("git checkout -q q")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
+
+    # reset base_a back to its original state and port back again
+    repo.s("git branch -f base_a base_a@{1}")
     repo.s("git queue rebase")
     assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
     with open(repo.directory / "shared") as f:
@@ -657,3 +681,194 @@ def test_port_user_merge_conflicted_baseline_above(repo: Git):
     assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
     with open(repo.directory / "shared") as f:
         assert f.read().strip() == "merged"
+
+    # reset base_a back to its original state and port back again
+    repo.s("git branch -f base_a base_a@{1}")
+    repo.s("git queue rebase")
+    assert "shared" == repo.so("git show --remerge-diff HEAD^{/resolved} --name-only --format=")
+    with open(repo.directory / "shared") as f:
+        assert f.read().strip() == "merged"
+
+
+def test_conflict(repo: Git):
+    "test ports that require applying and reverting a conflict from the baselines"
+
+    repo.c("0")
+    repo.s("git checkout -q -b base_a")
+    repo.c("aaa", filename="shared")
+    repo.s("git checkout `git rev-parse HEAD^`")
+    repo.c("bbb", filename="shared")
+    repo.s("git checkout -q base_a")
+    repo.s("git merge HEAD@{1}; [[ $? = 1 ]]")
+    assert repo.unmerged() == {"shared"}
+    repo.s("echo abab > shared && git add shared && git commit -m conflict")
+    repo.s("git branch conflict HEAD")
+
+    repo.c("X", filename="base_shared")
+
+    repo.s("git checkout -q HEAD^ -b base_b")
+    repo.c("Y", filename="base_shared")
+
+    repo.s("git queue init -b q base_a base_b; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"base_shared"}
+    repo.s("echo XY > base_shared && git add base_shared && git queue continue")
+    repo.c("1")
+
+    def i():
+        # stating state, queue has conflict in both bases
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto HEAD^{/aaa}")
+        yield  # base_a has conflict, base_b has aaa
+        assert repo.log() == [
+            "0",
+            "aaa",
+            "bbb",
+            "conflict",
+            "X",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+            "1",
+        ]
+
+        # reset queue back to conflict in both bases
+        repo.s("git checkout -q q  && git reset --hard q@{1}")
+
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto HEAD^{/aaa}")
+        yield  # both bases only have aaa
+        assert repo.log() == ["0", "aaa", "X", "Y", "resolved conflicts", "merged baselines", "1"]
+
+        repo.s("git branch -f base_a base_a@{1}")
+        yield  # base_a back to conflict
+        assert repo.log() == [
+            "0",
+            "aaa",
+            "bbb",
+            "conflict",
+            "X",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+            "1",
+        ]
+
+        repo.s("git branch -f base_b base_b@{1}")
+        yield  # base_b back to conflict
+        assert repo.log() == [
+            "0",
+            "aaa",
+            "bbb",
+            "conflict",
+            "X",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+            "1",
+        ]
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto HEAD^{/bbb}")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto HEAD^{/bbb}")
+        yield  # both bases only have bbb
+        assert repo.log() == ["0", "bbb", "X", "Y", "resolved conflicts", "merged baselines", "1"]
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto conflict^{/aaa}")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto conflict^{/aaa}")
+        yield  # both bases only have aaa
+        assert repo.log() == ["0", "aaa", "X", "Y", "resolved conflicts", "merged baselines", "1"]
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto conflict")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto conflict^{/aaa}")
+        yield  # one base has conflict, the other has aaa
+        assert repo.log() == [
+            "0",
+            "aaa",
+            "X",
+            "bbb",
+            "conflict",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+            "1",
+        ]
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto conflict")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto conflict^{/bbb}")
+        yield  # one base has conflict, the other has bbb
+        assert repo.log() == [
+            "0",
+            "bbb",
+            "X",
+            "aaa",
+            "conflict",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+            "1",
+        ]
+
+        # add a commit to master
+        repo.s("git checkout -q master")
+        repo.c("1")
+
+        # make a new conflict on top of that
+        repo.s("git checkout -q -b conflict2 master")
+        repo.c("aaa", filename="shared")
+        repo.s("git checkout `git rev-parse HEAD^`")
+        repo.c("bbb", filename="shared")
+        repo.s("git checkout -q conflict2")
+        repo.s("git merge HEAD@{1}; [[ $? = 1 ]]")
+        assert repo.unmerged() == {"shared"}
+        repo.s("echo abab > shared && git add shared && git commit -m conflict")
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto conflict2")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto conflict2^{/bbb}")
+        yield  # one base has conflict2, the other has bbb
+        assert repo.log() == [
+            "0",
+            "1",
+            "bbb",
+            "X",
+            "aaa",
+            "conflict",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+        ]
+
+        repo.s("git checkout -q base_b")
+        repo.s("git rebase HEAD^ --onto conflict")
+        repo.s("git checkout -q base_a")
+        repo.s("git rebase HEAD^ --onto conflict^{/bbb}")
+        yield  # one base has conflict, the other has bbb
+        assert repo.log() == [
+            "0",
+            "bbb",
+            "X",
+            "aaa",
+            "conflict",
+            "Y",
+            "resolved conflicts",
+            "merged baselines",
+        ]
+
+    for _ in i():
+
+        repo.s("git checkout -q q")
+        repo.s("git queue rebase")
+        assert "base_shared" == repo.so(
+            "git show --remerge-diff HEAD^{/resolved} --name-only --format="
+        )
+        with open(repo.directory / "base_shared") as f:
+            assert f.read().strip() == "XY"
