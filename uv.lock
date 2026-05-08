@@ -168,7 +168,7 @@ wheels = [
 
 [[package]]
 name = "gitq"
-version = "0.0.9"
+version = "0.0.10"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },

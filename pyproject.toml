@@ -1,6 +1,6 @@
 [project]
 name = "gitq"
-version = "0.0.9"
+version = "0.0.10"
 description = "git based patch manager"
 authors = [
     {name = "Lawrence D'Anna",email = "larry@elder-gods.org"}
@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 dependencies = [
     "pyyaml>=6.0.3,<7.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/smoofra/gitq"
 
 [project.scripts]
 git-swap = "gitq.git_swap:main"
