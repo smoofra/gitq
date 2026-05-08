@@ -58,7 +58,10 @@ class Baseline(YAMLObject):
         if not self.remote:
             if not self.ref:
                 return commit.abbrev, commit.title
-            ref = git.abbrev_symbolic(self.ref)
+            try:
+                ref = git.abbrev_symbolic(self.ref)
+            except GitFailed:
+                ref = self.ref  # ref might have been deleted
             return commit.abbrev, f"({ref}) {commit.title}"
 
         remote = self.remote
@@ -69,9 +72,12 @@ class Baseline(YAMLObject):
         if remote_name and self.ref.startswith("refs/heads/"):
             branch = self.ref.removeprefix("refs/heads/")
             ref = f"refs/remotes/{remote_name}/{branch}"
-            if git.sha(ref) == self.sha:
-                ref = git.abbrev_symbolic(ref)
-                return commit.abbrev, f"({ref}) {commit.title}"
+            try:
+                if git.sha(ref) == self.sha:
+                    ref = git.abbrev_symbolic(ref)
+                    return commit.abbrev, f"({ref}) {commit.title}"
+            except GitFailed:
+                pass  # remote ref could have been deleted
 
         return commit.abbrev, f"({self.ref} @ {remote}) {commit.title}"
 
