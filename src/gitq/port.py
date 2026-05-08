@@ -178,6 +178,11 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
         Output.print("Can't handle multiple merge bases")
         return None  # patching code below assumes single point of divergence
 
+    # Read all the commits on the left
+    left_topo = git.patches_and_merges(*M.parents, *mb)
+    commits.update({c.sha: c for c in left_topo})
+    left = set(left_topo)
+
     new_parents: List[Sha] = []
     for A in M.parents:
         # Bʹ..A: patches in A not yet in any new baseline (used for essentialness)
@@ -188,53 +193,31 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             continue
 
         # Determine which patches are essential: cannot be reverted from both A and M.
-        essential_patch_ids: set[str] = set()
-        todo: List[Patch | Merge] = [A_commits[0]]
-        seen: set[Sha] = set()
-        with git.temp_index(tree=M.sha) as gitM, git.temp_index(tree=A) as gitA:
-            while todo:
-                commit = todo.pop()
-                if commit.sha in seen:
-                    continue
-                seen.add(commit.sha)
-                if not isinstance(commit, Patch):
-                    if not git.is_conflicted(commit):
-                        todo.extend(commits[sha] for sha in commit.parents if sha in commits)
+        essential: set[Patch | Merge] = set()
+        s = State(A, frozenset(A_commits))
+        with git.temp_index(tree=M.sha) as gitM:
+            for commit in A_commits:
+                if s2 := apply(s, commit, reverse=True):
+                    try:
+                        gitM.apply_diff_to_index(s.tree, s2.tree)
+                        s = s2
                         continue
-                    if base := git.merge_base(*commit.parents):
-                        # try to back out both sides together
-                        if gitA.check_apply_diff_to_index(
-                            base, commit.sha, reverse=True
-                        ) and gitM.check_apply_diff_to_index(base, commit.sha, reverse=True):
-                            gitA.apply_diff_to_index(base, commit.sha, reverse=True)
-                            gitM.apply_diff_to_index(base, commit.sha, reverse=True)
-                            if base in commits:
-                                todo.append(commits[base])
-                            continue
-                    Output.print("Can't handle conflict", commit.summary)
-                    return None  # TODO handle stacked user merges
-                if not (
-                    gitA.check_apply_patch_to_index(commit, reverse=True)
-                    and gitM.check_apply_patch_to_index(commit, reverse=True)
-                ):
-                    essential_patch_ids.add(commit.patch_id)
-                else:
-                    gitA.apply_patch_to_index(commit, reverse=True)
-                    gitM.apply_patch_to_index(commit, reverse=True)
-                todo.extend(commits[sha] for sha in commit.parents if sha in commits)
-            if not essential_patch_ids:
-                Output.print("Found no essential patches for", A_commits[0].summary)
-                return None
+                    except GitFailed as e:
+                        if e.rc != 1:
+                            raise
+                essential.add(commit)
+        if not essential:
+            Output.print("Found no essential patches for", A_commits[0].summary)
+            return None
 
         # Find Aʹ, the first commit in Bʹ with all the essential patches in A
-        found_by_sha: Dict[Sha, set[str]] = defaultdict(set)
-        for commit in git.commits(*Bʹ, *mb, reverse=True):
+        found_by_sha: Dict[Sha, set[Merge | Patch]] = defaultdict(set)
+        for commit in git.patches_and_merges(*Bʹ, *mb, reverse=True):
             found = found_by_sha[commit.sha]
-            if not commit.is_merge:
-                found.add(git.patch_id(commit.sha))
+            found.add(commit)
             for parent in commit.parents:
                 found.update(found_by_sha[parent])
-            if essential_patch_ids <= found:
+            if essential <= found:
                 Aʹ = commit.sha
                 break
         else:
@@ -243,20 +226,15 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
 
         new_parents.append(Aʹ)
 
-    # Read all the commits on both sides
-    left: set[Patch | Merge] = set()
-    right: set[Patch | Merge] = set()
-    left_topo = git.patches_and_merges(*M.parents, *mb)
+    # Read all the commits on the right
     right_topo = git.patches_and_merges(*new_parents, *mb)
-    for topo, S in zip([left_topo, right_topo], [left, right]):
-        for commit in topo:
-            S.add(commit)
-            commits[commit.sha] = commit
+    commits.update({c.sha: c for c in right_topo})
+    right = set(right_topo)
 
     state: State | None = State(M.tree, frozenset(left))
 
     # Revert any commits from the left side that do not occur in the right
-    for commit in left_topo[1:]:
+    for commit in left_topo:
         if commit not in right:
             state = apply(state, commit, reverse=True)
             if state is None:
