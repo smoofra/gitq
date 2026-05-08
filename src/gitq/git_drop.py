@@ -23,7 +23,8 @@ class Main(continuations.Main):
         parser = argparse.ArgumentParser(description=description)
         parser.add_argument("commit", nargs="?", metavar="COMMIT")
         parser.add_argument("--continue", "-c", action="store_true", dest="resume")
-        parser.add_argument("--edit", "-e", action="store_true")
+        parser.add_argument("--edit", "-e", action="store_true", default=True)
+        parser.add_argument("--no-edit", action="store_false", dest="edit")
         parser.add_argument("--abort", action="store_true")
         args = parser.parse_args()
 

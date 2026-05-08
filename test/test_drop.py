@@ -36,7 +36,7 @@ def test_drop_conflict(repo: Git):
     repo.w("shared", "from_e")
     repo.s("git add shared && git commit -q -m e")
 
-    repo.s("git drop --edit :/c; [[ $? = 2 ]]")
+    repo.s("git drop :/c; [[ $? = 2 ]]")
     assert repo.unmerged() == {"shared"}
 
     repo.w("shared", "from_e")

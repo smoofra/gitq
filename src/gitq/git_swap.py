@@ -298,9 +298,12 @@ class Main(continuations.Main):
         parser.add_argument(
             "--edit",
             "-e",
+            default=True,
             action="store_true",
             help="if conflicts arise, suspend so the user can resolve them",
         )
+        parser.add_argument("--no-edit", action="store_false", dest="edit")
+
         parser.add_argument("--status", action="store_true", help="print status")
         parser.add_argument(
             "commit",
