@@ -183,7 +183,7 @@ class Queue:
             with open(self.queuefile_path, "r") as f:
                 self.qf = yaml.load(f, Loader=Loader)
             return
-        raise Exception("This branch is not a queue.")
+        raise NotAQueue("This branch is not a queue.")
 
     queuefile_name = ".git-queue"
 

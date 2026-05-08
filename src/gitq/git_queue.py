@@ -4,7 +4,18 @@ import argparse
 import yaml
 
 from .git import Git, GitFailed
-from .queue import QueueFile, Baseline, Queue, Loader, Dumper, DETECT, message, RebaseOptions
+from .queue import (
+    QueueFile,
+    Baseline,
+    Queue,
+    Loader,
+    Dumper,
+    DETECT,
+    message,
+    RebaseOptions,
+    NotAQueue,
+)
+from .output import Output
 from .continuations import Abort, UserError, Heading, Skip
 from . import continuations
 
@@ -313,6 +324,21 @@ class Main(continuations.Main):
             m = message("update .git-queue", "update-queuefile")
             self.git("commit", "-m", m, Queue.queuefile_name)
         super().check_clean()
+
+    def status(self):
+        try:
+            q = Queue(self.git, bare=DETECT)
+        except NotAQueue:
+            pass
+        else:
+            Output.print(self.git.branch() or self.git.head(), "is a queue.")
+            Output.print()
+            Output.print("baselines:")
+            for baseline in q.qf.baselines:
+                Output.print("  ", baseline.summary)
+            Output.print()
+
+        super().status()
 
 
 main = Main()
