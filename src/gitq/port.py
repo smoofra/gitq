@@ -11,13 +11,13 @@ Merge = Commit
 
 class State(NamedTuple):
     tree: Sha
-    left: frozenset[Patch | Merge]
+    applied: frozenset[Patch | Merge]
 
     def add(self, c: Patch | Merge, *, reverse: bool = True, tree: Sha | None = None) -> "State":
         if reverse:
-            return State(tree or self.tree, self.left - {c})
+            return State(tree or self.tree, self.applied - {c})
         else:
-            return State(tree or self.tree, self.left | {c})
+            return State(tree or self.tree, self.applied | {c})
 
 
 def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Commit | None:
@@ -125,7 +125,7 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
     def apply(state: State | None, head: Patch | Merge, *, reverse: bool = False) -> State | None:
         if state is None:
             return None
-        if (not reverse) == (head in state.left):
+        if (not reverse) == (head in state.applied):
             return state  # already applied
 
         if not git.is_conflicted(head):
@@ -269,7 +269,7 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             Output.print("Failed to apply", commits[sha].summary)
             return None
 
-    assert state is not None and state.left == right
+    assert state is not None and state.applied == right
 
     # Create the ported merge commit, preserving the original author
     author = split_author(M.author)
