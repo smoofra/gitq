@@ -68,6 +68,10 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
             Output.print("Can't handle multi-merge-base:", head.summary)
             return None
 
+        if len(head.parents) != 2:
+            Output.print("Can't handle conflicted octopus:", head.summary)
+            return None
+
         for order in head.parents, reversed(head.parents):
             X, Y = (commits[sha] for sha in order)
             side = "left" if order is head.parents else "right"
@@ -150,10 +154,6 @@ def port_user_merge(M: Commit, B: list[Sha], Bʹ: list[Sha], *, git: Git) -> Com
                 state = apply_parents(state, head, mb=mb)
                 state = apply(state, head)
             return state
-
-        if len(head.parents) != 2:
-            Output.print("Can't handle conflicted octopus:", head.summary)
-            return None
 
         old_mb = mb
         mb = git.all_merge_bases(*head.parents, none_ok=True)
