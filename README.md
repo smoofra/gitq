@@ -1,12 +1,5 @@
 # GitQ
 
-##  ⚠️ 🪏 Work In Progress 🪏 ⚠️ 
-
-This is currently a work in progress.  Planned features for `git-queue` include:
-
-*  Unapplied patches.  If rebase fails due to conflicts, give the user the
-   choice to save commits as patch files to be applied later.
-
 ## Description
 
 This is my second attempt to make a git-based patch queue tool.

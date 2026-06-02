@@ -16,7 +16,7 @@ from .queue import (
     NotAQueue,
 )
 from .output import Output
-from .continuations import Abort, UserError, Heading, Skip
+from .continuations import Abort, UserError, Heading, Skip, SavePatch
 from . import continuations
 
 
@@ -151,6 +151,17 @@ class Main(continuations.Main):
             description="Skip the current commit and continue.",
         )
         subs.add_parser(
+            "save-patch",
+            help="save the conflicting commit as a patch and continue the rebase",
+            description="Abort the current cherry-pick, save the commit as a .patch file "
+            "at the repo root, record it in .git-queue, and continue rebasing.",
+        )
+        apply_parser = subs.add_parser(
+            "apply",
+            help="apply an unapplied patch",
+        )
+        apply_parser.add_argument("patch", nargs="?")
+        subs.add_parser(
             "abort",
             help="abort suspend operation",
             description="Abort a suspended operation and restore previous state.",
@@ -190,6 +201,9 @@ class Main(continuations.Main):
 
         if args.command == "skip":
             self.resume(Skip())
+
+        if args.command == "save-patch":
+            self.resume(SavePatch())
 
         queuefile = self.git.directory / Queue.queuefile_name
 
@@ -260,6 +274,11 @@ class Main(continuations.Main):
                 else:
                     q = Queue(self.git, qf=qf, bare=None)
                 q.init(branch=args.branch)
+
+            if args.command == "apply":
+                q = Queue(self.git, bare=DETECT)
+                q.apply_patch(args.patch)
+                return
 
             if args.command in ("rebase", "add", "remove"):
                 q = Queue(self.git, bare=DETECT)
@@ -337,6 +356,11 @@ class Main(continuations.Main):
             for baseline in q.qf.baselines:
                 Output.print("  ", baseline.summary)
             Output.print()
+            if q.qf.unapplied_patches:
+                Output.print("unapplied patches:")
+                for patch in q.qf.unapplied_patches:
+                    Output.print("  ", patch)
+                Output.print()
 
         super().status()
 

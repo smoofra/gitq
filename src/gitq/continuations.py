@@ -412,6 +412,13 @@ class Skip(Resume):
     """
 
 
+class SavePatch(Resume):
+    """
+    Raised into a resume stack to save the current cherry-pick commit as a patch
+    file and continue with remaining commits.
+    """
+
+
 @dataclass
 class CherryPickContinue(Continuation):
     """

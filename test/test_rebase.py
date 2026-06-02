@@ -1191,6 +1191,199 @@ def test_remove_stale_ambiguous(repo: Git):
     repo.s("git queue rebase --remove base", check_error="is ambiguous")
 
 
+def test_save_patch_basic(repo: Git):
+    "save-patch saves the conflicting commit and the rebase completes with the rest"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+
+    repo.c("b")
+    repo.c("c")
+
+    repo.s("git queue init base")
+
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    base1 = repo.sha("HEAD")
+
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    repo.s("git queue save-patch")
+
+    assert repo.log() == ["a", "B", "baseline", "save patch", "c"]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert (repo.directory / "patches/0-b.patch").exists()
+
+
+def test_save_patch_remaining_applied(repo: Git):
+    "save-patch saves only the conflicting commit; remaining commits are applied normally"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+
+    repo.c("b")
+    repo.c("c")
+    repo.c("d")
+
+    repo.s("git queue init base")
+
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    base1 = repo.sha("HEAD")
+
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    repo.s("git queue save-patch")
+
+    assert repo.log() == ["a", "B", "baseline", "save patch", "c", "d"]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+
+
+def test_save_patch_multiple(repo: Git):
+    "save-patch twice accumulates both commits in unapplied_patches"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+
+    repo.c("b")
+    repo.c("c")
+
+    repo.s("git queue init base")
+
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.c("C", filename="c")
+
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    repo.s("git queue save-patch; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"c"}
+
+    repo.s("git queue save-patch")
+
+    assert "save patch" in repo.log()
+    assert "save patch" in repo.log()
+    assert set(repo.qf.unapplied_patches or []) == {"patches/0-b.patch", "patches/1-c.patch"}
+
+
+def test_save_patch_survives_rebase(repo: Git):
+    "patch files are re-committed to the branch when the queue is rebased"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert (repo.directory / "patches/0-b.patch").exists()
+
+    # Advance the base and rebase again
+    repo.s("git checkout -q base")
+    repo.c("D", filename="d")
+    base2 = repo.sha("HEAD")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase")
+
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert (repo.directory / "patches/0-b.patch").exists()
+    assert [b.sha for b in repo.qf.baselines] == [base2]
+
+
+def test_save_patch_survives_rebase_bare(repo: Git):
+    "patch files are re-committed to the branch when a bare queue is rebased"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init --bare base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert (repo.directory / "patches/0-b.patch").exists()
+
+    # Advance the base and rebase again
+    repo.s("git checkout -q base")
+    repo.c("D", filename="d")
+    base2 = repo.sha("HEAD")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase")
+
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert (repo.directory / "patches/0-b.patch").exists()
+    assert [b.sha for b in repo.qf.baselines] == [base2]
+
+
+def test_apply_patch_clean(repo: Git):
+    "apply applies cleanly when the conflicting file has been removed"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+    repo.s("git queue save-patch")
+    # "b" has "B" content; remove it so b.patch can apply via 3-way merge
+    repo.s("git rm b -q && git commit -m 'remove b' -q")
+
+    repo.s("git queue apply")
+
+    assert repo.qf.unapplied_patches is None
+    assert not (repo.directory / "patches/0-b.patch").exists()
+    assert "apply patch: b" in repo.log()
+    assert repo.r("b") == "b"
+
+
+def test_apply_patch_conflict(repo: Git):
+    "apply suspends on conflict; resolved state is committed on continue"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+    repo.s("git queue save-patch")
+    # b.patch conflicts with the existing "B" content in "b"
+    repo.s("git queue apply; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    repo.w("b", "resolved\n")
+    repo.s("git add b")
+    repo.s("git queue continue")
+
+    assert repo.qf.unapplied_patches is None
+    assert not (repo.directory / "patches/0-b.patch").exists()
+    assert "apply patch: b" in repo.log()
+
+
+def test_apply_patch_none(repo: Git):
+    "apply exits non-zero when there are no unapplied patches"
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.s("git queue init base")
+    assert not repo.t("git queue apply")
+
+
 def test_rebase_loop(remote_repo):
     local, remote = remote_repo
     remote.c("base-init")

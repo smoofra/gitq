@@ -110,20 +110,42 @@ def test_commit(repo: Git):
     assert changed == {
         ".git-queue",
         "c",
-        "patches/0-baseline.patch",
-        "patches/0-merged-baselines.patch",
-        "patches/1-a.patch",
-        "patches/2-b.patch",
+        "commits/0-baseline.patch",
+        "commits/0-merged-baselines.patch",
+        "commits/1-a.patch",
+        "commits/2-b.patch",
     }
 
     diff_q_mq = {x.strip() for x in repo("diff", "--name-only", "q", "mq").strip().splitlines()}
 
     assert diff_q_mq == {
         ".git-queue",
-        "patches/0-merged-baselines.patch",
-        "patches/1-a.patch",
-        "patches/2-b.patch",
+        "commits/0-merged-baselines.patch",
+        "commits/1-a.patch",
+        "commits/2-b.patch",
     }
+
+
+def test_commit_preserves_unapplied_patches(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+
+    repo.s("git queue commit -m v1 -b mq")
+
+    committed = set(repo.so("git show --format= --name-only mq").splitlines())
+    assert "patches/0-b.patch" in committed
+
+    repo.s("git checkout -q mq")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
 
 
 def test_edit(repo: Git):

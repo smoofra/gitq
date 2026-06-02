@@ -14,7 +14,6 @@ from .output import Output
 from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch
 from .continuations import (
     EditBranch,
-    PickCherries,
     Step,
     Then,
     CheckoutBranch,
@@ -23,6 +22,9 @@ from .continuations import (
     Suspend,
     Resume,
     Heading,
+    handles,
+    SavePatch,
+    Skip,
 )
 from .port import port_user_merge
 from .yaml import YAMLObject, BaseLoader
@@ -101,6 +103,7 @@ class QueueFile(YAMLObject):
     description: str | None = field(default=None)
     baselines: List[Baseline] = field(default_factory=list)
     commits: List[str] | None = field(default=None)
+    unapplied_patches: List[str] | None = field(default=None)
 
 
 @dataclass
@@ -126,7 +129,7 @@ Continuation.register(Baseline)
 Continuation.register(QueueFile)
 Continuation.register(RebaseOptions)
 
-CommitType = Literal["baseline", "update-queuefile"]
+CommitType = Literal["baseline", "update-queuefile", "save-patch", "apply"]
 
 
 def message(m: str, type: CommitType, title: str | None = None):
@@ -431,15 +434,19 @@ class Queue:
         return False
 
     @property
-    def patch_directory(self) -> Path:
+    def commits_directory(self) -> Path:
+        return self.git.directory / "commits"
+
+    @property
+    def patches_directory(self) -> Path:
         return self.git.directory / "patches"
 
-    def write_patches(self) -> Iterator[Path]:
-        os.makedirs(self.patch_directory, exist_ok=True)
+    def write_commits(self) -> Iterator[Path]:
+        os.makedirs(self.commits_directory, exist_ok=True)
         commits = self.get_commits(reverse=True)
         num_digits = len(str(len(commits) - 1))
         for i, commit in enumerate(commits):
-            yield commit.make_patch_file(self.patch_directory, index=(i, num_digits))
+            yield commit.make_patch_file(self.commits_directory, index=(i, num_digits))
 
     @property
     def is_historiography(self) -> bool:
@@ -492,7 +499,7 @@ class Queue:
         with self.git.temp_index_and_files():
             qf = replace(self.qf)
             qf.commits = list()
-            for patch in self.write_patches():
+            for patch in self.write_commits():
                 self.git("add", patch)
                 qf.commits.append(str(patch.relative_to(self.git.directory)))
             self.save_queuefile(qf, stage=True)
@@ -508,6 +515,26 @@ class Queue:
                 self.git.cmd(["git", "commit", "-m", message])
             else:
                 self.git.cmd(["git", "commit"], interactive=True)
+
+    def apply_patch(self, patch: str | None) -> None:
+        if not self.qf.unapplied_patches:
+            raise UserError("No unapplied patches")
+
+        if patch:
+            patch = os.path.relpath(patch, self.git.directory)
+        else:
+            patch = self.qf.unapplied_patches[0]
+
+        if not (self.git.directory / patch).exists():
+            raise UserError(f"Patch file not found: {patch}")
+
+        with ApplyPatchContinue(patch, bare=self.bare):
+            try:
+                self.git.cmd(["git", "am", "--3way", patch])
+            except GitFailed:
+                if (self.git.gitdir / "rebase-apply").exists():
+                    raise Suspend(status="Resolve the conflicts.")
+                raise
 
     def recreate_queue(self) -> Sha:
         if not self.qf.commits:
@@ -643,6 +670,7 @@ class RebaseOne(Step):
                     old_baselines=old_q.qf.baselines,
                     qf=q.qf,
                     bare=q.bare,
+                    old_head=self.git.sha(head),
                 ),
                 FindAndPickCherries(head, old_q.qf.baselines, self.bare),
             )
@@ -651,6 +679,106 @@ class RebaseOne(Step):
             diff = self.git.cmd(["git", "diff", "--name-only", old_sha, "HEAD"]).strip()
             if diff:
                 Output.print(f"Warning: content changed!\n{diff}\n")
+
+
+@dataclass
+class QueueCherryPickContinue(Continuation):
+    "Like CherryPickContinue, but on SavePatch: save the commit, update the queue, and commit."
+
+    ref: Sha
+    bare: Branch | None
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        try:
+            with handles(Skip, SavePatch):
+                yield
+        except Skip:
+            self.git.cherry_pick_abort()
+            return
+        except SavePatch:
+            q = Queue(self.git, bare=self.bare)
+            self.git.cherry_pick_abort()
+            commit = self.git.commit(self.ref)
+            os.makedirs(q.patches_directory, exist_ok=True)
+            existing = list(q.qf.unapplied_patches or [])
+            patch_path = commit.make_patch_file(q.patches_directory, index=(len(existing), 1))
+            rel = str(patch_path.relative_to(self.git.directory))
+            self.git("add", rel)
+            q.qf.unapplied_patches = existing + [rel]
+            q.save_queuefile(commit_message=message("save patch", "save-patch"))
+            return
+        except (Exception, Resume):
+            self.git.cherry_pick_abort()
+            raise
+        if self.git.cherry_pick_in_progress:
+            if self.git.has_unmerged_files():
+                Output.print("The index still has unmerged files.")
+                raise Suspend(status="Resolve the conflicts.")
+            self.git.cmd(["git", "cherry-pick", "--continue"])
+
+
+@dataclass
+class QueuePickCherries(Continuation):
+    "Like PickCherries, but uses QueueCherryPickContinue for save-patch support."
+
+    cherries: List[Sha]
+    bare: Branch | None
+    edit: bool = field(default=False)
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        yield
+        while self.cherries:
+            cherry, *self.cherries = self.cherries
+            commit = self.git.commit(cherry)
+            with Heading(f"Cherry picking {commit.summary}", quiet=True):
+                try:
+                    self.git.cmd(
+                        ["git", "cherry-pick", "--quiet", "--allow-empty", cherry],
+                        comment=commit.title,
+                    )
+                except GitFailed:
+                    if self.edit and self.git.cherry_pick_in_progress:
+                        with QueueCherryPickContinue(ref=cherry, bare=self.bare):
+                            raise Suspend(status="Resolve the conflicts.")
+                    else:
+                        self.git.cherry_pick_abort()
+                        raise
+
+
+@dataclass
+class ApplyPatchContinue(Continuation):
+    "After a conflicting git am, finish applying the patch on resume."
+
+    patch: str
+    bare: Branch | None
+
+    @contextmanager
+    def impl(self) -> Iterator:
+        try:
+            with handles(Skip):
+                yield
+        except Skip:
+            self.git.cmd(["git", "am", "--abort"])
+            return
+        except (Exception, Resume):
+            self.git.cmd(["git", "am", "--abort"])
+            raise
+
+        if (self.git.gitdir / "rebase-apply").exists():
+            if self.git.has_unmerged_files():
+                Output.print("The index still has unmerged files.")
+                raise Suspend(status="Resolve the conflicts.")
+            self.git.cmd(["git", "am", "--continue"])
+
+        title = self.git.commit("HEAD").title
+        self.git.cmd(["git", "rm", "--quiet", self.patch])
+        q = Queue(self.git, bare=self.bare)
+        patches = list(q.qf.unapplied_patches or [])
+        patches.remove(self.patch)
+        q.qf.unapplied_patches = patches or None
+        q.save_queuefile(commit_message=message("apply patch", "apply", title))
 
 
 @dataclass
@@ -663,7 +791,7 @@ class FindAndPickCherries(Step):
 
     def run(self) -> None:
         patches = list(Queue.find_patches(self.head, self.old_baselines, "HEAD", git=self.git))
-        with PickCherries(cherries=[b.sha for b in patches], edit=True):
+        with QueuePickCherries(cherries=[b.sha for b in patches], bare=self.bare, edit=True):
             pass
 
 
@@ -768,6 +896,7 @@ class MergeBaselines(Step, Continuation):
     find_user_merges: bool = True
     needs_checkout: bool = True
     suspended_at: Sha | None = None
+    old_head: Sha | None = field(default=None)
 
     def run(self) -> None:
         with self:
@@ -790,6 +919,21 @@ class MergeBaselines(Step, Continuation):
     @cached_property
     def q(self):
         return Queue(self.git, qf=self.qf, bare=self.bare)
+
+    def save_queuefile(
+        self,
+        amend: bool = False,
+        commit_message: str = "",
+    ) -> None:
+        for patch_name in self.qf.unapplied_patches or ():
+            assert self.old_head
+            self.git("checkout", self.old_head, "--", patch_name)
+        if amend or commit_message:
+            self.q.save_queuefile(amend=amend, commit_message=commit_message)
+        elif self.qf.unapplied_patches:
+            self.q.save_queuefile(commit_message=message("save patches", "save-patch"))
+        else:
+            self.q.save_queuefile()
 
     def still_needed(self) -> Iterator[Baseline]:
         "return a list of baselines that have not yet been merged"
@@ -847,11 +991,11 @@ class MergeBaselines(Step, Continuation):
         except GitFailed:
             if self.git.merge_in_progress:
                 if self.git.unmerged_files() == {Queue.queuefile_name}:
-                    self.q.save_queuefile(commit_message=self.m)
+                    self.save_queuefile(commit_message=self.m)
                     return True
                 self.git("merge", "--abort")
         else:
-            self.q.save_queuefile(amend=True)
+            self.save_queuefile(amend=True)
             return True
         return False
 
@@ -873,9 +1017,9 @@ class MergeBaselines(Step, Continuation):
         needed = list(self.still_needed())
         if not needed:
             if not q.bare:
-                q.save_queuefile(commit_message=message("baseline", "baseline", q.qf.title))
+                self.save_queuefile(commit_message=message("baseline", "baseline", q.qf.title))
             else:
-                q.save_queuefile()
+                self.save_queuefile()
             return
 
         # See if octopus merge can do it.
@@ -896,11 +1040,11 @@ class MergeBaselines(Step, Continuation):
                     if not self.git.merge_in_progress:
                         raise
                     if self.git.unmerged_files() == {q.queuefile_name}:
-                        q.save_queuefile(commit_message=self.m)
+                        self.save_queuefile(commit_message=self.m)
                         continue
                     self.git("merge", "--abort")
                 else:
-                    q.save_queuefile(amend=True)
+                    self.save_queuefile(amend=True)
                     continue
                 # Oh, no!  A conflict!
                 self.resolve_conflicts(baseline)
@@ -936,9 +1080,9 @@ class MergeBaselines(Step, Continuation):
                         # commit incorporating baseline, so we keep making progress.
                         to_merge = u
                     continue
-                self.q.save_queuefile(commit_message=self.m)
+                self.save_queuefile(commit_message=self.m)
             else:
-                self.q.save_queuefile(amend=True)
+                self.save_queuefile(amend=True)
 
             # u contains baseline, and u is merged.  Conflict is resolved.
             if contains_baseline:
@@ -953,7 +1097,7 @@ class MergeBaselines(Step, Continuation):
                 self.git("merge", "--abort")
                 continue
             else:
-                self.q.save_queuefile(amend=True)
+                self.save_queuefile(amend=True)
                 return
 
         # to_merge conflicts with HEAD.  Find an appropriate (not a "merged
