@@ -510,7 +510,7 @@ class Queue:
                     raise Exception("re-created queue does not match original")
 
         with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
-            self.git("read-tree", tree)
+            self.git.checkout_tree(tree)
             if message:
                 self.git.cmd(["git", "commit", "-m", message])
             else:

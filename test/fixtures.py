@@ -95,6 +95,10 @@ class Git(BaseGit):
     def qf(self):
         return Queue(self, bare=DETECT).qf
 
+    @property
+    def q(self):
+        return Queue(self, bare=DETECT)
+
     def c(self, message: str, *, filename: str | None = None, content: str | None = None):
         if filename is None:
             filename = message

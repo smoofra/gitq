@@ -93,6 +93,7 @@ def test_commit(repo: Git):
     repo.s("git queue rebase")
 
     repo.s("git queue commit -m 1 -b mq")
+    assert not any(True for x in repo.q.commits_directory.glob("*"))
 
     repo.s("git checkout -q -b base2 base")
     repo.c("c")
@@ -102,6 +103,7 @@ def test_commit(repo: Git):
 
     repo.s("git config set branch.q.gitq-historiography refs/heads/mq")
     repo.s("git queue commit -m 2")
+    assert not any(True for x in repo.q.commits_directory.glob("*"))
 
     changed = {
         x.strip() for x in repo("show", "--format=", "--name-only", "mq").strip().splitlines()
@@ -140,12 +142,22 @@ def test_commit_preserves_unapplied_patches(repo: Git):
     assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
 
     repo.s("git queue commit -m v1 -b mq")
+    assert not any(True for x in repo.q.commits_directory.glob("*"))
 
     committed = set(repo.so("git show --format= --name-only mq").splitlines())
     assert "patches/0-b.patch" in committed
 
     repo.s("git checkout -q mq")
     assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase")
+
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert repo.log() == ["a", "B", "baseline", "c"]
+
+    repo.s("git queue commit -m rebased")
+    assert not any(True for x in repo.q.commits_directory.glob("*"))
 
 
 def test_edit(repo: Git):

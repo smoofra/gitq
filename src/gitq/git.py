@@ -505,7 +505,9 @@ class Git:
 
     def checkout_tree(self, tree: Sha) -> None:
         "replace index and working files with the specified tree"
-        deleted = self("diff", "--diff-filter=A", "--name-only", tree, quiet=True).splitlines()
+        deleted = self(
+            "diff", "--diff-filter=A", "--name-only", "--no-renames", tree, quiet=True
+        ).splitlines()
         self("read-tree", tree)
         self("checkout", "--", ".")
         for rel in deleted:
