@@ -22,11 +22,11 @@ def test_rebase(repo: Git):
 
     repo.s("git checkout -q master")
     assert repo.log() == ["a", "b", "initialized queue"]
-    assert [b.sha for b in repo.q.baselines] == [base0]
+    assert [b.sha for b in repo.qf.baselines] == [base0]
 
     repo.s("git queue rebase")
     assert repo.log() == ["A", "baseline", "b"]
-    assert [b.sha for b in repo.q.baselines] == [base1]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
 
 
 def test_no_refresh(repo: Git):
@@ -43,12 +43,12 @@ def test_no_refresh(repo: Git):
     repo.s("git commit -qa --amend -m A")
 
     repo.s("git checkout -q master")
-    assert [b.sha for b in repo.q.baselines] == [base0]
+    assert [b.sha for b in repo.qf.baselines] == [base0]
 
     sha = repo.sha("HEAD")
     repo.s("git queue rebase --no-refresh")
     # Baseline SHA stays at the old value — upstream changes are not incorporated
-    assert [b.sha for b in repo.q.baselines] == [base0]
+    assert [b.sha for b in repo.qf.baselines] == [base0]
     assert repo.log() == ["a", "baseline", "b"]
     assert repo.sha("HEAD") != sha
     repo.s(f"git diff --name-only {sha}")
@@ -72,7 +72,7 @@ def test_two_baselines(repo: Git):
     repo.s("git queue init a b")
     repo.w("c", "c")
     repo.s("git add c && git commit -m c")
-    assert [b.sha for b in repo.q.baselines] == [a, b]
+    assert [b.sha for b in repo.qf.baselines] == [a, b]
 
     repo.s("git queue rebase")
     assert repo.log() == ["0", "a", "b", "merged baselines", "c"]
@@ -85,7 +85,7 @@ def test_two_baselines(repo: Git):
     repo.s("git checkout c")
     repo.s("git queue rebase")
     assert repo.log() == ["0", "a", "A", "b", "merged baselines", "c"]
-    assert [b.sha for b in repo.q.baselines] == [A, b]
+    assert [b.sha for b in repo.qf.baselines] == [A, b]
 
 
 def test_rebase_merge(repo: Git):
@@ -117,7 +117,7 @@ def test_rebase_merge(repo: Git):
     repo.s("git queue rebase")
 
     assert repo.log() == ["A", "baseline", "b", "c"]
-    assert [b.sha for b in repo.q.baselines] == [base1]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
 
 
 def test_rebase_conflicted_merge(repo: Git):
@@ -188,7 +188,7 @@ def test_rebase_skip(repo: Git):
     repo.s("git queue skip")
 
     assert repo.log() == ["a", "B", "baseline", "c"]
-    assert [b.sha for b in repo.q.baselines] == [base1]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
 
 
 @pytest.mark.parametrize("case", ["normal", "wrong_tool", "abort"])
@@ -234,7 +234,7 @@ def test_rebase_conflict(repo: Git, case):
         return
 
     assert repo.log() == ["A", "baseline", "b", "c"]
-    assert [b.sha for b in repo.q.baselines] == [base1]
+    assert [b.sha for b in repo.qf.baselines] == [base1]
     assert set(repo("diff", "--name-only", sha, "HEAD").splitlines()) == {"a", ".git-queue"}
 
 
@@ -1011,7 +1011,7 @@ def test_use_local(remote_repo):
 
     # --use-local: local base branch is still at r1, so baseline SHA is unchanged
     local.s("git queue rebase --use-local")
-    assert local.q.baselines[0].sha == r1
+    assert local.qf.baselines[0].sha == r1
 
     local.s("git checkout -q base")
     local.c("x")
@@ -1041,7 +1041,7 @@ def test_no_use_local(remote_repo):
 
     # --no-use-local: fetches from remote, baseline advances to r2
     local.s("git queue rebase --no-use-local")
-    assert local.q.baselines[0].sha == r2
+    assert local.qf.baselines[0].sha == r2
     assert local.log() == ["0", "x", "baseline", "1"]
 
 

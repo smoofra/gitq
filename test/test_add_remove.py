@@ -21,7 +21,7 @@ def test_init_add(repo: Git, distinct: bool):
     # Initialize the queue with base as the baseline
     repo.s("git queue init base")
     assert repo.log() == ["0", "common", "patch", "initialized queue"]
-    assert [b.sha for b in repo.q.baselines] == [root]
+    assert [b.sha for b in repo.qf.baselines] == [root]
 
     # Create a second branch to add as an additional baseline
     repo.s(f"git checkout -q  -b extra {common}")
@@ -38,7 +38,7 @@ def test_init_add(repo: Git, distinct: bool):
     repo.s("git checkout -q master")
     repo.s("git queue add extra")
     assert repo.log() == ["0", "common", "extra", "merged baselines", "patch"]
-    assert [b.sha for b in repo.q.baselines] == [root, extra]
+    assert [b.sha for b in repo.qf.baselines] == [root, extra]
 
 
 def test_add_remove(repo: Git):

@@ -92,7 +92,7 @@ class Git(BaseGit):
         Output.print("=" * n)
 
     @property
-    def q(self):
+    def qf(self):
         return Queue(self, bare=DETECT).qf
 
     def c(self, message: str, *, filename: str | None = None, content: str | None = None):
