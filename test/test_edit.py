@@ -118,3 +118,69 @@ def test_edit_root(repo: Git):
     assert (repo / "a").read_text() == "AAA\n"
     assert (repo / "b").read_text() == "bbb\n"
     assert all("temp" not in branch for branch in repo.branches())
+
+
+def test_edit_continue_with_staged_changes(repo: Git):
+    """`git edit --continue` with staged changes amends them into the commit."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.c("a")
+    repo.c("c")
+    assert repo.log() == ["0", "a", "c"]
+
+    repo.s("git edit :/a; [[ $? = 2 ]]")
+
+    # stage a change, but forget to commit --amend
+    repo.w("a", "AAA")
+    repo.s("git add .")
+
+    repo.s("git edit --continue")
+    assert repo.log() == ["0", "a", "c"]
+    assert repo.r("a") == "AAA"
+    assert repo.r("c") == "c"
+    assert repo.is_clean()
+
+
+def test_edit_continue_with_unstaged_changes(repo: Git):
+    """`git edit --continue` with a dirty tree suspends again, keeping the edits."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.c("a", content="aaa")
+    repo.c("b", filename="a", content="aaa\nbbb")
+    assert repo.log() == ["0", "a", "b"]
+
+    repo.s("git edit :/a; [[ $? = 2 ]]")
+
+    # make a change that would conflict with replaying b, and don't stage it
+    repo.w("a", "AAA")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+
+    # the user's edit survives, and the operation is still in progress
+    assert repo.r("a") == "AAA"
+    assert repo.log() == ["0", "a"]
+    repo.s("git edit --status")
+
+    # staging it is enough to continue: the edit is amended into commit a,
+    # and then replaying b conflicts as it normally would
+    repo.s("git add .")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"a"}
+    repo.w("a", "AAA\nbbb")
+    repo.s("git add .")
+    repo.s("git edit --continue")
+
+    assert repo.log() == ["0", "a", "b"]
+    assert repo.r("a") == "AAA\nbbb"
+    assert repo.is_clean()
+
+
+def test_edit_continue_ignores_untracked_files(repo: Git):
+    """Untracked files don't block `git edit --continue`."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.c("a")
+    repo.c("c")
+
+    repo.s("git edit :/a; [[ $? = 2 ]]")
+    repo.w("junk", "junk")
+
+    repo.s("git edit --continue")
+    assert repo.log() == ["0", "a", "c"]
+    assert repo.others() == {"junk"}
