@@ -7,7 +7,7 @@ from typing import Iterator
 from dataclasses import dataclass
 
 from . import continuations
-from .continuations import Continuation, EditBranch, Suspend, Abort, check_unstaged
+from .continuations import Continuation, EditBranch, Suspend, Abort, Skip, check_unstaged
 from .git_swap import edit_commit
 from .output import Output
 
@@ -64,6 +64,11 @@ class Main(continuations.Main):
             "--abort",
             action="store_true",
         )
+        parser.add_argument(
+            "--skip",
+            action="store_true",
+            help="drop the conflicting commit and continue",
+        )
         parser.add_argument("--status", action="store_true", help="print status")
         args = parser.parse_args()
 
@@ -73,6 +78,9 @@ class Main(continuations.Main):
 
         if args.abort:
             self.resume(Abort())
+
+        if args.skip:
+            self.resume(Skip())
 
         if args.status:
             self.status()

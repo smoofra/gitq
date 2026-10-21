@@ -184,3 +184,47 @@ def test_edit_continue_ignores_untracked_files(repo: Git):
     repo.s("git edit --continue")
     assert repo.log() == ["0", "a", "c"]
     assert repo.others() == {"junk"}
+
+
+def test_edit_skip(repo: Git):
+    """`git edit --skip` drops a commit that conflicts when it is replayed."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.c("a", content="aaa")
+    repo.c("b", filename="a", content="aaa\nbbb")
+    repo.c("c")
+    assert repo.log() == ["0", "a", "b", "c"]
+
+    repo.s("git edit :/a; [[ $? = 2 ]]")
+
+    # amend a so that replaying b conflicts
+    repo.w("a", "AAA")
+    repo.s("git add .")
+    repo.s("git commit --amend -q --no-edit")
+
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"a"}
+
+    # drop b, and the commits above it are still replayed
+    repo.s("git edit --skip")
+    assert repo.log() == ["0", "a", "c"]
+    assert repo.r("a") == "AAA"
+    assert repo.r("c") == "c"
+    assert repo.is_clean()
+
+
+def test_edit_skip_no_operation(repo: Git):
+    """`git edit --skip` with nothing in progress is an error, not a crash."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.s("git edit --skip; [[ $? = 1 ]]")
+
+
+def test_edit_skip_not_allowed_here(repo: Git):
+    """`git edit --skip` is refused while the user is editing the commit."""
+    repo.s("git commit --allow-empty -m 0")
+    repo.c("a")
+
+    repo.s("git edit HEAD; [[ $? = 2 ]]")
+    repo.s("git edit --skip", check_error="not allowed here")
+
+    repo.s("git edit --abort")
+    assert repo.log() == ["0", "a"]
