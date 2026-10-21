@@ -395,6 +395,16 @@ class Git:
             return True
         return not self("diff-index", "--cached", "--name-only", "HEAD", quiet=True)
 
+    def has_staged_changes(self) -> bool:
+        "True if the index differs from HEAD, or has any content at all on an unborn branch."
+        if self.on_orphan_branch():
+            return bool(list(self.ls_files()))
+        return bool(self("diff-index", "--cached", "--name-only", "HEAD", quiet=True))
+
+    def unstaged_files(self) -> List[str]:
+        "Tracked files modified in the working tree.  Untracked files are ignored."
+        return [entry.path for entry in self.status() if entry.unstaged not in (" ", "?")]
+
     @property
     def cherry_pick_in_progress(self) -> bool:
         return (self.gitdir / "CHERRY_PICK_HEAD").exists()

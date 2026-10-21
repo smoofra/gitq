@@ -25,6 +25,8 @@ from .continuations import (
     handles,
     SavePatch,
     Skip,
+    check_unstaged,
+    finish_cherry_pick,
 )
 from .port import port_user_merge
 from .yaml import YAMLObject, BaseLoader
@@ -690,9 +692,12 @@ class QueueCherryPickContinue(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
+        with handles(Skip, SavePatch):
+            yield from self.body()
+
+    def body(self) -> Iterator:
         try:
-            with handles(Skip, SavePatch):
-                yield
+            yield
         except Skip:
             self.git.cherry_pick_abort()
             return
@@ -715,7 +720,8 @@ class QueueCherryPickContinue(Continuation):
             if self.git.has_unmerged_files():
                 Output.print("The index still has unmerged files.")
                 raise Suspend(status="Resolve the conflicts.")
-            self.git.cmd(["git", "cherry-pick", "--continue"])
+            check_unstaged(self.git)
+            finish_cherry_pick(self.git)
 
 
 @dataclass
@@ -756,9 +762,12 @@ class ApplyPatchContinue(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
+        with handles(Skip):
+            yield from self.body()
+
+    def body(self) -> Iterator:
         try:
-            with handles(Skip):
-                yield
+            yield
         except Skip:
             self.git.cmd(["git", "am", "--abort"])
             return
@@ -770,6 +779,14 @@ class ApplyPatchContinue(Continuation):
             if self.git.has_unmerged_files():
                 Output.print("The index still has unmerged files.")
                 raise Suspend(status="Resolve the conflicts.")
+            check_unstaged(self.git)
+            if not self.git.has_staged_changes():
+                # `git am --continue` can't commit nothing, and --allow-empty only
+                # covers patches that were empty to begin with.
+                raise Suspend(
+                    status="The conflict resolution left nothing to apply.\n"
+                    "Stage something, or skip the patch with `git queue skip`."
+                )
             self.git.cmd(["git", "am", "--continue"])
 
         title = self.git.commit("HEAD").title

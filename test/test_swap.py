@@ -712,3 +712,58 @@ def test_deleted(repo: Git):
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert "".join(repo.log()) == "abA"
     assert not repo.others()
+
+
+def test_resume_empty(repo: Git):
+    "A resolution that leaves the swapped-down commit empty still holds content constant"
+    repo.s("git commit --allow-empty -m 0")
+    repo.w("x", "base")
+    repo.s("git add . && git commit -q -m base")
+    repo.w("x", "two")
+    repo.s("git add . && git commit -q -m two")
+    repo.w("x", "one")
+    repo.s("git add . && git commit -q -m one")
+    sha = repo.sha("HEAD")
+
+    repo.s("git swap; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"x"}
+
+    # resolve by keeping the base content, so "one" has nothing left to do
+    repo.w("x", "base")
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+
+    assert repo.log() == ["0", "base", "one", "two"]
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert repo.t("git diff --exit-code HEAD~2 HEAD^")  # "one" is now empty
+    assert repo.is_clean()
+
+
+def test_resume_unstaged(repo: Git):
+    "Unstaged changes suspend the swap again instead of being thrown away"
+    repo.s("git commit --allow-empty -m 0")
+    repo.w("other", "other")
+    repo.s("git add . && git commit -q -m other")
+    repo.w("a", "aaa")
+    repo.s("git add . && git commit -q -m a")
+    repo.w("a", "aaa\nbbb")
+    repo.s("git add . && git commit -q -m b")
+    sha = repo.sha("HEAD")
+
+    repo.s("git swap; [[ $? = 2 ]]")
+    repo.w("a", "bbb")
+    repo.s("git add -u")
+    repo.w("other", "work in progress")  # forgot to stage this
+
+    repo.s("git swap --continue; [[ $? = 2 ]]")
+    assert repo.r("other") == "work in progress"
+    repo.s("git swap --status")
+
+    repo.s("git add -u")
+    repo.s("git swap --continue")
+    assert repo.log() == ["0", "other", "b", "a"]
+    # swap holds the final content constant, so the staged edit lands in "b"
+    # and is reverted by "a".  It is noise in the history, but it is not lost.
+    assert repo.t(f"git diff --exit-code {sha} HEAD")
+    assert repo.r("other") == "other"
+    assert "work in progress" in repo.so("git show HEAD^:other")

@@ -7,7 +7,7 @@ from typing import Iterator
 from dataclasses import dataclass
 
 from . import continuations
-from .continuations import Continuation, EditBranch, Suspend, Abort
+from .continuations import Continuation, EditBranch, Suspend, Abort, check_unstaged
 from .git_swap import edit_commit
 from .output import Output
 
@@ -37,19 +37,10 @@ class AmendStagedChanges(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         yield
-        if unstaged := self.unstaged_files():
-            raise Suspend(
-                status="You have unstaged changes:\n"
-                + "".join(f"\t{path}\n" for path in unstaged)
-                + "Stage them with `git add`, or discard them."
-            )
-        if self.git("diff-index", "--cached", "--name-only", "HEAD", quiet=True):
+        check_unstaged(self.git)
+        if self.git.has_staged_changes():
             Output.print("# folding staged changes into HEAD")
             self.git("commit", "--amend", "--no-edit")
-
-    def unstaged_files(self) -> list[str]:
-        "Modified tracked files.  Untracked files are ignored, as they are elsewhere."
-        return [entry.path for entry in self.git.status() if entry.unstaged not in (" ", "?")]
 
 
 class Main(continuations.Main):

@@ -419,6 +419,38 @@ class SavePatch(Resume):
     """
 
 
+def check_unstaged(git: Git) -> None:
+    """
+    Suspend if the user left changes unstaged.
+
+    Continuing with a dirty working tree either fails outright or quietly
+    drops whatever the user forgot to stage, and the error recovery from
+    that resets the branch, throwing their work away for good.
+    """
+    if unstaged := git.unstaged_files():
+        raise Suspend(
+            status="You have unstaged changes:\n"
+            + "".join(f"\t{path}\n" for path in unstaged)
+            + "Stage them with `git add`, or discard them."
+        )
+
+
+def finish_cherry_pick(git: Git) -> None:
+    """
+    Finish a conflicted cherry-pick.
+
+    If the conflict resolution left nothing to commit, `git cherry-pick
+    --continue` refuses to proceed, so make the empty commit ourselves.
+    Cherries are picked with --allow-empty, so keeping it is consistent,
+    and the user can always `--skip` instead.
+    """
+    if git.has_staged_changes():
+        git.cmd(["git", "cherry-pick", "--continue"])
+    else:
+        Output.print("# the conflict resolution left this commit empty")
+        git.cmd(["git", "commit", "--quiet", "--allow-empty", "--no-edit"])
+
+
 @dataclass
 class CherryPickContinue(Continuation):
     """
@@ -443,7 +475,8 @@ class CherryPickContinue(Continuation):
             if self.git.has_unmerged_files():
                 Output.print("The index still has unmerged files.")
                 raise Suspend(status="Resolve the conflicts.")
-            self.git.cmd(["git", "cherry-pick", "--continue"])
+            check_unstaged(self.git)
+            finish_cherry_pick(self.git)
 
 
 def cherry_pick(cherry: Commit, *, edit: bool = False, git: Git) -> None:

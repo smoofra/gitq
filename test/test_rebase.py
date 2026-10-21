@@ -1400,3 +1400,146 @@ def test_rebase_loop(remote_repo):
         "git queue rebase --remove refs/remotes/origin/base-branch",
         check_error="Cannot rebase queue onto zero baselines",
     )
+
+
+def test_rebase_conflict_resolved_to_empty(repo: Git):
+    """Resolving a rebase conflict in favor of the baseline leaves the patch empty."""
+    repo.c("0")
+    repo.s("git checkout -q -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.w("shared", "patch version")
+    repo.s("git add shared && git commit -q -m patch")
+
+    # the baseline picks up its own version of the same file
+    repo.s("git checkout -q base")
+    repo.w("shared", "base version")
+    repo.s("git add shared && git commit -q -m base2")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+
+    # take the baseline's version: the patch now does nothing
+    repo.w("shared", "base version")
+    repo.s("git add shared")
+    repo.s("git queue continue")
+
+    assert repo.log() == ["0", "base1", "base2", "baseline", "patch"]
+    assert repo.r("shared") == "base version"
+    assert repo.is_clean()
+    assert repo.t("git diff --exit-code HEAD^ HEAD")
+
+
+def test_rebase_conflict_with_unstaged_changes(repo: Git):
+    """Unstaged changes suspend the rebase again instead of being thrown away."""
+    repo.c("0")
+    repo.s("git checkout -q -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.w("shared", "patch version")
+    repo.s("git add shared && git commit -q -m patch")
+
+    repo.s("git checkout -q base")
+    repo.w("shared", "base version")
+    repo.s("git add shared && git commit -q -m base2")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"shared"}
+
+    repo.w("shared", "resolved")
+    repo.s("git add shared")
+    repo.w("base1", "work in progress")  # forgot to stage this
+
+    repo.s("git queue continue; [[ $? = 2 ]]")
+    assert repo.r("base1") == "work in progress"
+    repo.s("git queue status")
+
+    repo.s("git add base1")
+    repo.s("git queue continue")
+
+    assert repo.log() == ["0", "base1", "base2", "baseline", "patch"]
+    assert repo.r("shared") == "resolved"
+    assert repo.r("base1") == "work in progress"
+    assert repo.is_clean()
+
+
+def test_apply_patch_conflict_resolved_to_empty(repo: Git):
+    """An apply whose resolution leaves nothing to commit suspends with advice."""
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+    repo.s("git queue apply; [[ $? = 2 ]]")
+    assert repo.unmerged() == {"b"}
+
+    # resolve by keeping what's already there: the patch has nothing left to add
+    repo.w("b", "B")
+    repo.s("git add b")
+    repo.s("git queue continue; [[ $? = 2 ]]")
+    repo.s("git queue status")
+
+    # the patch stays unapplied after skipping it
+    repo.s("git queue skip")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert repo.is_clean()
+
+
+def test_skip_after_second_suspend(repo: Git):
+    """`skip` and `save-patch` are still available after suspending a second time."""
+    repo.c("0")
+    repo.s("git checkout -q -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.w("shared", "patch version")
+    repo.s("git add shared && git commit -q -m patch")
+
+    repo.s("git checkout -q base")
+    repo.w("shared", "base version")
+    repo.s("git add shared && git commit -q -m base2")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+
+    # resolve, but leave something unstaged, which suspends again
+    repo.w("shared", "resolved")
+    repo.s("git add shared")
+    repo.w("base1", "work in progress")
+    repo.s("git queue continue; [[ $? = 2 ]]")
+
+    repo.s("git queue skip")
+    assert repo.log() == ["0", "base1", "base2", "baseline"]
+    assert repo.r("base1") == "work in progress"  # skip keeps it too
+
+
+def test_save_patch_after_second_suspend(repo: Git):
+    """`save-patch` is still available after suspending a second time."""
+    repo.c("0")
+    repo.s("git checkout -q -b base")
+    repo.c("base1")
+    repo.s("git queue init -b q base")
+    repo.w("shared", "patch version")
+    repo.s("git add shared && git commit -q -m patch")
+
+    repo.s("git checkout -q base")
+    repo.w("shared", "base version")
+    repo.s("git add shared && git commit -q -m base2")
+
+    repo.s("git checkout -q q")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+
+    # resolve, but leave something unstaged, which suspends again
+    repo.w("shared", "resolved")
+    repo.s("git add shared")
+    repo.w("base1", "work in progress")
+    repo.s("git queue continue; [[ $? = 2 ]]")
+
+    repo.s("git queue save-patch")
+    assert repo.qf.unapplied_patches == ["patches/0-patch.patch"]
+    assert repo.log() == ["0", "base1", "base2", "baseline", "save patch"]
