@@ -52,12 +52,16 @@ line tool for the upload password, so that tool has to be on `PATH` and has to
 hold a PyPI API token:
 
 ```sh
-uv tool install keyring          # once, puts `keyring` on PATH via ~/.local/bin
+uv tool install keyring     # once; installs to ~/.local/bin
+uv tool update-shell        # only if ~/.local/bin isn't on PATH yet
 keyring set https://upload.pypi.org/legacy/ __token__
 # paste a PyPI API token (starts with "pypi-") at the prompt
+keyring get https://upload.pypi.org/legacy/ __token__   # should print it back
 ```
 
-On macOS keyring stores this in the login Keychain.
+The service has to be the upload endpoint exactly, and the username the literal
+`__token__`: that pair is what `uv publish --username __token__` looks up. On
+macOS the token lands in your login Keychain.
 
 `check-url` makes `uv publish` ask PyPI which files already exist and skip
 them, so a re-run after a partial upload is safe.
