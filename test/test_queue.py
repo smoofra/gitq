@@ -240,3 +240,20 @@ def test_commit_binary_file(repo: Git):
     assert repo.branch() == "q"
     assert repo.sha("HEAD") == q_sha
     assert (repo / "blob.bin").read_bytes() == bytes(reversed(range(256))) * 4
+
+
+def test_status_shows_conflicts(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    suspended = repo.so("git queue rebase; [[ $? = 2 ]]")
+    assert "Unmerged paths:" in suspended
+    assert "both added:  b" in suspended
+
+    out = repo.so("git queue status")
+    assert "Unmerged paths:" in out
+    assert "both added:  b" in out

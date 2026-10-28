@@ -84,6 +84,18 @@ class StatusEntry(NamedTuple):
     orig_path: Optional[str]  # set for renames/copies
 
 
+# Unmerged `git status --porcelain` codes, with the descriptions git itself uses.
+CONFLICT_DESCRIPTIONS = {
+    "DD": "both deleted",
+    "AU": "added by us",
+    "UD": "deleted by them",
+    "UA": "added by them",
+    "DU": "deleted by us",
+    "AA": "both added",
+    "UU": "both modified",
+}
+
+
 def parse_porcelain_z(output: str) -> Iterator[StatusEntry]:
     tokens = iter(output.split("\0"))
     for entry in tokens:
@@ -603,6 +615,14 @@ class Git:
     def status(self) -> Iterator[StatusEntry]:
         out = self.cmd(["git", "status", "--porcelain", "-z"], quiet=True)
         yield from parse_porcelain_z(out)
+
+    def conflicts(self) -> List[Tuple[str, str]]:
+        "Unmerged paths, each with a description of its conflict."
+        return [
+            (desc, entry.path)
+            for entry in self.status()
+            if (desc := CONFLICT_DESCRIPTIONS.get(entry.staged + entry.unstaged))
+        ]
 
     def dirty_files(self) -> Iterator[str]:
         for line in self.status():

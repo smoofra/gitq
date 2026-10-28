@@ -195,6 +195,7 @@ class Main:
                 continuations, self.tool, e.ok_resumes, self.continue_command, e.status
             )
             yaml.dump(j, f, Dumper=Dumper)
+        self.print_conflicts()
         Output.print()
         Output.print("Suspended!")
         if e.status:
@@ -235,9 +236,20 @@ class Main:
 
         sys.exit(0)
 
+    def print_conflicts(self) -> None:
+        conflicts = self.git.conflicts()
+        if not conflicts:
+            return
+        width = max(len(desc) for desc, _ in conflicts)
+        Output.print()
+        Output.print("Unmerged paths:")
+        for desc, path in conflicts:
+            Output.print(f"  {desc + ':':<{width + 3}}{path}")
+
     def status(self) -> None:
         if not self.git.continuation.exists():
             Output.print("no operation in progress")
+            self.print_conflicts()
             return
         with open(self.git.continuation, "r") as f:
             j: Continuations = yaml.load(f, Loader)
@@ -247,6 +259,7 @@ class Main:
         for c in j.continuations:
             if isinstance(c, Heading):
                 Output.print(f" * {c.message}")
+        self.print_conflicts()
         Output.print()
         Output.print(j.status)
         if j.continue_command:
