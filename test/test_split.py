@@ -112,3 +112,25 @@ def test_split_abort_after_first_continue(repo: Git):
 
     assert repo.log() == ["0", "ab"]
     assert repo.t(f"git diff --exit-code {sha} HEAD")
+
+
+def test_split_leaving_a_tracked_file_unstaged(repo: Git):
+    repo.c("a")
+    repo.w("a", "A")
+    repo.w("b", "b")
+    repo.s("git add .")
+    repo.s("git commit -q -m ab")
+    sha = repo.sha("HEAD")
+
+    repo.s("git split HEAD; [[ $? = 2 ]]")
+
+    # commit only the new file, leaving the change to the tracked file `a`
+    # unstaged -- so the index and the working tree disagree about `a`
+    repo.s("git restore --staged a")
+    repo.s("git commit -q -m b")
+
+    repo.s("git split --continue; [[ $? = 2 ]]")
+    repo.s("git split --continue")
+
+    assert repo.log() == ["a", "b", "ab"]
+    assert repo.t(f"git diff --exit-code {sha} HEAD")

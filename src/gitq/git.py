@@ -13,6 +13,10 @@ from .output import Output
 
 FNULL = open(os.devnull, "w")
 
+# How many paths to hand a single `git checkout`, so a big list can't run into
+# the command line length limit.
+PATHS_PER_CHECKOUT = 100
+
 # Diff options required for output that `git apply` can consume.  --binary emits
 # literal binary deltas (and implies --full-index) instead of "Binary files differ";
 # textconv and external diff drivers produce diffs that read well but don't apply.
@@ -539,13 +543,46 @@ class Git:
 
     def checkout_tree(self, tree: Sha) -> None:
         "replace index and working files with the specified tree"
-        deleted = self(
-            "diff", "--diff-filter=A", "--name-only", "--no-renames", tree, quiet=True
-        ).splitlines()
-        self("read-tree", tree)
-        self("checkout", "--", ".")
+        restore: List[str] = []
+        deleted: List[str] = []
+        out = self("diff", "--name-status", "--no-renames", "-z", tree, quiet=True)
+        fields = iter(out.split("\0"))
+        for status in fields:
+            if not status:
+                continue
+            path = next(fields)
+            # "A" means added relative to `tree`: it's here, but not in `tree`
+            (deleted if status == "A" else restore).append(path)
+        self.read_tree(tree)
+        # the effect is that of `git checkout -- .`, which is what this was
+        Output.log_cmd("git checkout -- .")
+        self.checkout_paths(restore)
         for rel in deleted:
             (self.directory / rel).unlink()
+
+    def read_tree(self, tree: Sha) -> None:
+        "Replace the index with the specified tree."
+        try:
+            # A single-tree `-m` is not really a merge: it reads the tree just
+            # like a plain read-tree, but keeps the stat info of entries whose
+            # content didn't change, so a later `git status` doesn't have to
+            # re-hash the whole working tree.  It refuses when a file differs
+            # between the index and the working tree, which is the normal state
+            # part way through a `git split`.
+            self("read-tree", "-m", tree, quiet=True)
+            Output.log_cmd(["git", "read-tree", "-m", self.abbrev_if_sha(tree)])
+        except GitFailed:
+            self("read-tree", tree)
+
+    def checkout_paths(self, paths: List[str]) -> None:
+        """
+        Restore the given working tree files from the index.  `git checkout --
+        .` would be simpler, but it rewrites every file in the index, which is
+        slow in a large repository.  Quiet, because a list of paths this long
+        is not something anyone wants to read.
+        """
+        for i in range(0, len(paths), PATHS_PER_CHECKOUT):
+            self.cmd(["git", "checkout", "--", *paths[i : i + PATHS_PER_CHECKOUT]], quiet=True)
 
     def find_duplicates(self, base: str | None, branch: str, onto: str) -> Iterator[DupRecord]:
         "Determine which commits in base..branch are cherry-picked in onto"
