@@ -13,6 +13,11 @@ from .output import Output
 
 FNULL = open(os.devnull, "w")
 
+# Diff options required for output that `git apply` can consume.  --binary emits
+# literal binary deltas (and implies --full-index) instead of "Binary files differ";
+# textconv and external diff drivers produce diffs that read well but don't apply.
+BINARY_SAFE_DIFF = ("--binary", "--no-textconv", "--no-ext-diff")
+
 
 class GitFailed(Exception):
 
@@ -171,7 +176,14 @@ class Commit(object):
             filename = f"{i:0{num_digits}d}-{filename}"
         path = directory / filename
         with open(path, "wt") as f:
-            cmd = ["git", "show", "--diff-merges=first-parent", "--format=" + format, self.sha]
+            cmd = [
+                "git",
+                "show",
+                "--diff-merges=first-parent",
+                *BINARY_SAFE_DIFF,
+                "--format=" + format,
+                self.sha,
+            ]
             subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory, env=self.git.env)
         return path
 
@@ -638,7 +650,7 @@ class Git:
         "Apply (or reverse-apply) a commit's diff to the index"
         if len(commit.parents) > 1:
             raise Exception(f"commit {commit.summary} is not a patch")
-        diff = self("show", "--no-notes", commit.sha, "--", quiet=True)
+        diff = self("show", *BINARY_SAFE_DIFF, "--no-notes", commit.sha, "--", quiet=True)
         if not diff:
             return
         cmd = ["git", "apply", "--cached"]
@@ -661,7 +673,7 @@ class Git:
         "Check if commit can be applied (or reverted) to the index"
         if len(commit.parents) > 1:
             raise Exception(f"commit {commit.summary} is not a patch")
-        diff = self("show", "--no-notes", commit.sha, "--", quiet=True)
+        diff = self("show", *BINARY_SAFE_DIFF, "--no-notes", commit.sha, "--", quiet=True)
         if not diff:
             return True
         cmd = ["git", "apply", "--cached", "--check"]
@@ -690,7 +702,7 @@ class Git:
 
     def apply_diff_to_index(self, A: Sha, B: Sha, *, reverse: bool = False) -> None:
         "Apply (or reverse-apply) the diff between A and B to the index."
-        diff = self("diff", A, B, "--", quiet=True)
+        diff = self("diff", *BINARY_SAFE_DIFF, A, B, "--", quiet=True)
         if not diff:
             return
         cmd = ["git", "apply", "--cached"]
@@ -711,7 +723,7 @@ class Git:
 
     def check_apply_diff_to_index(self, A: Sha, B: Sha, *, reverse: bool = False) -> bool:
         "Check if the diff between A and B can be applied (or reverted) to the index"
-        diff = self("diff", A, B, "--", quiet=True)
+        diff = self("diff", *BINARY_SAFE_DIFF, A, B, "--", quiet=True)
         if not diff:
             return True
         cmd = ["git", "apply", "--cached", "--check"]

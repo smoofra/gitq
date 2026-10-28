@@ -210,3 +210,33 @@ def test_edit(repo: Git):
     repo.c("x")
     repo.s("git checkout -q mq")
     repo.s("git queue edit", check_error="diverged")
+
+
+def test_commit_binary_file(repo: Git):
+    repo.c("0")
+    repo.s("git branch -m base")
+    repo.s("git checkout -q -b q")
+    repo.c("a")
+
+    (repo / "blob.bin").write_bytes(bytes(range(256)))
+    repo("add", "blob.bin")
+    repo("commit", "-q", "-m", "add binary")
+
+    (repo / "blob.bin").write_bytes(bytes(reversed(range(256))) * 4)
+    repo("add", "blob.bin")
+    repo("commit", "-q", "-m", "change binary")
+
+    repo.s("git queue init base")
+    repo.s("git queue rebase")
+    q_sha = repo.sha("HEAD")
+
+    # the round-trip check inside `commit` is what would fail without --binary
+    repo.s("git queue commit -m 1 -b mq")
+
+    repo.s("git checkout -q mq")
+    assert "GIT binary patch" in repo.r("commits/2-add-binary.patch")
+
+    repo.s("git queue edit")
+    assert repo.branch() == "q"
+    assert repo.sha("HEAD") == q_sha
+    assert (repo / "blob.bin").read_bytes() == bytes(reversed(range(256))) * 4
