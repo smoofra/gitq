@@ -477,7 +477,10 @@ class Queue:
         if hb := self.get_historiography_branch(branch, git=self.git):
             return hb
         config_name = self.historiography_config_name(branch)
-        raise UserError(f"Commit to where?  Set config {config_name}")
+        raise UserError(
+            f"Commit to where?  Use `git queue commit --branch <branch>`, "
+            f"or set config {config_name} to refs/heads/<branch>"
+        )
 
     @classmethod
     def find_queue_branch(cls, branch: Branch, *, git: Git) -> Branch | None:
