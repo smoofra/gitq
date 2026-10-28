@@ -158,6 +158,13 @@ def is_merged_baseline(c: Commit) -> bool:
     return trailers.get("GitQ-Type") == "baseline"
 
 
+def read_patch_origin(path: Path) -> Sha | None:
+    "The sha on a patch file's `From` line: the commit it was extracted from."
+    with open(path, "r") as f:
+        m = re.match(r"From ([0-9a-fA-F]{7,40}) ", f.readline())
+    return Sha(m.group(1)) if m else None
+
+
 class NotAQueue(UserError):
     pass
 
@@ -533,13 +540,25 @@ class Queue:
         if not (self.git.directory / patch).exists():
             raise UserError(f"Patch file not found: {patch}")
 
-        with ApplyPatchContinue(patch, bare=self.bare):
+        origin = self.patch_origin(patch)
+        heading = f"Applying {patch}" + (f" (from {origin})" if origin else "")
+
+        with Heading(heading), ApplyPatchContinue(patch, bare=self.bare):
             try:
                 self.git.cmd(["git", "am", "--3way", patch])
             except GitFailed:
                 if (self.git.gitdir / "rebase-apply").exists():
                     raise Suspend(status="Resolve the conflicts.")
                 raise
+
+    def patch_origin(self, patch: str) -> str | None:
+        "Describe the commit a patch file was extracted from, if it names one."
+        if not (sha := read_patch_origin(self.git.directory / patch)):
+            return None
+        # a full sha always parses, whether or not the object is here
+        if self.git.ref_exists(f"{sha}^{{commit}}"):
+            return self.git.abbrev(sha)
+        return f"{sha[:10]}, not in this repo"
 
     def recreate_queue(self) -> Sha:
         if not self.qf.commits:

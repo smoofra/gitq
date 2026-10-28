@@ -4,7 +4,7 @@ from io import StringIO
 import yaml
 
 from gitq.git import Sha
-from gitq.queue import QueueFile, Loader, Dumper
+from gitq.queue import QueueFile, Loader, Dumper, read_patch_origin
 
 from .fixtures import Git, repo
 
@@ -257,3 +257,38 @@ def test_status_shows_conflicts(repo: Git):
     out = repo.so("git queue status")
     assert "Unmerged paths:" in out
     assert "both added:  b" in out
+
+
+def test_apply_status_names_the_patch(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("make b say b", filename="b", content="b")
+    original = repo.so("git rev-parse --short HEAD")
+    repo.s("git queue init base")
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+
+    patch = "patches/0-make-b-say-b.patch"
+    assert repo.qf.unapplied_patches == [patch]
+
+    repo.s("git queue apply; [[ $? = 2 ]]")
+    out = repo.so("git queue status")
+    assert f" * Applying {patch} (from {original})" in out
+
+
+def test_patch_origin_of_a_vanished_commit(repo: Git):
+    repo.c("a")
+    repo.s("git queue init HEAD~0")
+    missing = "0" * 40
+    (repo / "fake.patch").write_text(
+        f"From {missing} Mon Sep 17 00:00:00 2001\n"
+        "From: A U Thor <author@example.com>\n"
+        "Subject: [PATCH] a title\n"
+        "\n"
+        "body\n"
+    )
+    assert read_patch_origin(repo / "fake.patch") == missing
+    assert repo.q.patch_origin("fake.patch") == f"{missing[:10]}, not in this repo"
