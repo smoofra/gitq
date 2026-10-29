@@ -767,3 +767,39 @@ def test_resume_unstaged(repo: Git):
     assert repo.t(f"git diff --exit-code {sha} HEAD")
     assert repo.r("other") == "other"
     assert "work in progress" in repo.so("git show HEAD^:other")
+
+
+def squashable(repo: Git) -> None:
+    "Set up a conflicting swap that can be resolved by squashing."
+    repo.w("a", "a")
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    repo.w("a", "A")
+    repo.s("git add .")
+    repo.s("git commit -q -m B")
+    repo.s("git swap -e; [[ $? = 2 ]]")
+
+
+def test_squash_no_edit_message(repo: Git):
+    squashable(repo)
+    repo.s("EDITOR=false git swap --squash --no-edit-message")
+    assert repo.commit("HEAD").message == "b\n\nB\n"
+
+
+def test_squash_message(repo: Git):
+    squashable(repo)
+    repo.s("EDITOR=false git swap --squash -m 'squashed message'")
+    assert repo.commit("HEAD").message == "squashed message\n"
+
+
+def test_squash_message_from_a_file(repo: Git):
+    squashable(repo)
+    repo.w("msg.txt", "from a file\n\nwith a body")
+    repo.s("EDITOR=false git swap --squash -F msg.txt")
+    assert repo.commit("HEAD").message == "from a file\n\nwith a body\n"
+
+
+def test_squash_message_requires_squash(repo: Git):
+    repo.c("a")
+    # argparse errors go to stderr
+    repo.s("git swap -m x 2>&1", check_error="only for --squash")

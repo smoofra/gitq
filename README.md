@@ -201,6 +201,10 @@ Check out a queue branch associated with the current historiography branch.
 `git-swap` reverses the order of two adjacent commits, while holding the
 final content constant.
 
+When a swap conflicts, `--squash` combines the two commits instead.   The
+combined message is opened in your editor; `--no-edit-message` keeps it as
+is, and `--message`/`-m` or `--file`/`-F` replace it without an editor.
+
 
 ## `git-edit`
 

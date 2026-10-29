@@ -52,6 +52,11 @@ class Squash(Resume):
     back onto the branch.
     """
 
+    def __init__(self, *, message: str = "", edit: bool = True) -> None:
+        super().__init__()
+        self.message = message
+        self.edit = edit
+
 
 class Fixup(Resume):
     """
@@ -101,7 +106,7 @@ class OrSquash(Continuation):
                 self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
             if self.stop:
                 raise Stop
-        except Squash:
+        except Squash as squash:
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
@@ -110,16 +115,21 @@ class OrSquash(Continuation):
                 author = split_author(B.author)
                 message = self.git.gitdir / "COMMIT_EDITMSG"
                 with open(message, "w") as f:
-                    f.write(B.message)
-                    f.write("\n\n")
-                    f.write(A.message)
-                cmd = ["git", "commit", "--allow-empty", "--edit", "-F", message]
+                    if squash.message:
+                        f.write(squash.message)
+                    else:
+                        f.write(B.message)
+                        f.write("\n\n")
+                        f.write(A.message)
+                cmd = ["git", "commit", "--allow-empty", "-F", message]
+                if squash.edit:
+                    cmd.append("--edit")
                 with self.git.temp_env(
                     GIT_AUTHOR_NAME=author.name,
                     GIT_AUTHOR_EMAIL=author.email,
                     GIT_AUTHOR_DATE=author.date,
                 ) as git:
-                    git.cmd(cmd, interactive=True)
+                    git.cmd(cmd, interactive=squash.edit)
             if self.stop:
                 raise Stop
 
@@ -287,6 +297,18 @@ class Main(continuations.Main):
         parser.add_argument(
             "--squash", action="store_true", help="squash instead of completing this swap"
         )
+        message_args = parser.add_mutually_exclusive_group()
+        message_args.add_argument(
+            "--message", "-m", default="", help="commit message for --squash"
+        )
+        message_args.add_argument(
+            "--file", "-F", default="", help="read the --squash commit message from this file"
+        )
+        message_args.add_argument(
+            "--no-edit-message",
+            action="store_true",
+            help="with --squash, keep the combined message instead of editing it",
+        )
         parser.add_argument(
             "--fixup", action="store_true", help="fixup instead of completing this swap"
         )
@@ -317,6 +339,13 @@ class Main(continuations.Main):
         if sum(bool(x) for x in mode_args) > 1:
             parser.error("use only one of --continue, --abort, --stop, --status, or --squash")
 
+        message = args.message
+        if args.file:
+            with open(args.file, "r") as f:
+                message = f.read()
+        if (message or args.no_edit_message) and not args.squash:
+            parser.error("--message, --file and --no-edit-message are only for --squash")
+
         if args.status:
             self.status()
             return
@@ -328,7 +357,8 @@ class Main(continuations.Main):
             elif args.stop:
                 resume = Stop()
             elif args.squash:
-                resume = Squash()
+                # a message of your own means there is nothing left to edit
+                resume = Squash(message=message, edit=not (message or args.no_edit_message))
             elif args.fixup:
                 resume = Fixup()
             self.resume(resume)
