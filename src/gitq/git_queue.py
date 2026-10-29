@@ -1,3 +1,4 @@
+import os
 import re
 import argparse
 
@@ -177,9 +178,20 @@ class Main(continuations.Main):
         edit_parser.add_argument("--branch", "-b", help="branch name")
 
         commit_parser = subs.add_parser(
-            "commit", help="commit changes to queue to a historiography"
+            "commit",
+            help="commit changes to queue to a historiography",
+            description="Commit changes to the queue to a historiography.  Without "
+            "--message or --file, your editor is opened to write the message.",
         )
-        commit_parser.add_argument("--message", "-m", type=str, default="", help="commit message")
+        message_args = commit_parser.add_mutually_exclusive_group()
+        message_args.add_argument("--message", "-m", type=str, default="", help="commit message")
+        message_args.add_argument(
+            "--file",
+            "-F",
+            type=str,
+            default="",
+            help="read the commit message from this file",
+        )
         commit_parser.add_argument(
             "--branch", "-b", type=str, default="", help="historiography branch"
         )
@@ -219,15 +231,18 @@ class Main(continuations.Main):
             if not self.git.is_clean():
                 raise UserError("Error: repo not clean")
             q = Queue(self.git, bare=DETECT)
+            # git runs from the top level, so a relative path wouldn't resolve
+            message_file = os.path.abspath(args.file) if args.file else ""
             with Heading("Committing changes to queue"):
                 if args.branch:
                     if branch := self.git.branch():
                         meta_branch = Queue.get_historiography_branch(branch, git=self.git)
                         if meta_branch is None:
                             Queue.set_historiography_branch(branch, args.branch, git=self.git)
-                    q.commit(message=args.message, meta_branch="refs/heads/" + args.branch)
+                    meta = "refs/heads/" + args.branch
                 else:
-                    q.commit(message=args.message, meta_branch=q.historiography_branch())
+                    meta = q.historiography_branch()
+                q.commit(message=args.message, message_file=message_file, meta_branch=meta)
             return
 
         if args.command == "edit":

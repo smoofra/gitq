@@ -187,6 +187,11 @@ patch file.   This means that the patch files recorded in a historiography
 have enough information to reconstruct the exact original commit shas that
 they were created from.
 
+The historiography branch is named with `--branch`/`-b` the first time, and
+remembered in `branch.<queue>.gitq-historiography` after that.   The commit
+message comes from `--message`/`-m`, or from a file with `--file`/`-F`; with
+neither, your editor is opened.
+
 ### `git queue edit`
 
 Check out a queue branch associated with the current historiography branch.

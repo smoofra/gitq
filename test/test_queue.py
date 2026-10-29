@@ -292,3 +292,22 @@ def test_patch_origin_of_a_vanished_commit(repo: Git):
     )
     assert read_patch_origin(repo / "fake.patch") == missing
     assert repo.q.patch_origin("fake.patch") == f"{missing[:10]}, not in this repo"
+
+
+def test_commit_message_from_a_file(repo: Git):
+    repo.c("0")
+    repo.s("git branch -m base")
+    repo.s("git checkout -q -b q")
+    repo.c("a")
+    repo.s("git queue init base")
+    repo.s("git queue rebase")
+
+    repo.s("mkdir sub")
+    repo.w("sub/msg.txt", "from a file\n\nwith a body")
+    # relative to the caller's directory, not the top level
+    repo.s("cd sub && git queue commit -F msg.txt -b mq")
+    assert repo.commit("mq").message == "from a file\n\nwith a body\n"
+
+    # nothing has changed, so there is nothing to commit
+    repo.s("git queue commit -m again", check_error="queue has not changed")
+    assert repo.branch() == "q"

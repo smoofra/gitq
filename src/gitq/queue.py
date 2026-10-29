@@ -505,7 +505,7 @@ class Queue:
                 return key.removeprefix("branch.").removesuffix(".gitq-historiography")
         return None
 
-    def commit(self, *, message: str = "", meta_branch: str):
+    def commit(self, *, message: str = "", message_file: str = "", meta_branch: str):
         sha = self.git.sha("HEAD")
 
         with self.git.temp_index_and_files():
@@ -523,8 +523,12 @@ class Queue:
 
         with CheckoutBranch(meta_branch, orphan=not self.git.ref_exists(meta_branch)):
             self.git.checkout_tree(tree)
+            if not self.git.has_staged_changes():
+                raise UserError("The queue has not changed since the last commit")
             if message:
                 self.git.cmd(["git", "commit", "-m", message])
+            elif message_file:
+                self.git.cmd(["git", "commit", "-F", message_file])
             else:
                 self.git.cmd(["git", "commit"], interactive=True)
 
