@@ -131,7 +131,7 @@ Continuation.register(Baseline)
 Continuation.register(QueueFile)
 Continuation.register(RebaseOptions)
 
-CommitType = Literal["baseline", "update-queuefile", "save-patch", "apply"]
+CommitType = Literal["baseline", "update-queuefile", "save-patch", "apply", "drop"]
 
 
 def message(m: str, type: CommitType, title: str | None = None):
@@ -160,6 +160,8 @@ def is_merged_baseline(c: Commit) -> bool:
 
 def read_patch_origin(path: Path) -> Sha | None:
     "The sha on a patch file's `From` line: the commit it was extracted from."
+    if not path.exists():
+        return None
     with open(path, "r") as f:
         m = re.match(r"From ([0-9a-fA-F]{7,40}) ", f.readline())
     return Sha(m.group(1)) if m else None
@@ -533,14 +535,7 @@ class Queue:
                 self.git.cmd(["git", "commit"], interactive=True)
 
     def apply_patch(self, patch: str | None) -> None:
-        if not self.qf.unapplied_patches:
-            raise UserError("No unapplied patches")
-
-        if patch:
-            patch = os.path.relpath(patch, self.git.directory)
-        else:
-            patch = self.qf.unapplied_patches[0]
-
+        patch = self.find_unapplied_patch(patch)
         if not (self.git.directory / patch).exists():
             raise UserError(f"Patch file not found: {patch}")
 
@@ -554,6 +549,29 @@ class Queue:
                 if (self.git.gitdir / "rebase-apply").exists():
                     raise Suspend(status="Resolve the conflicts.")
                 raise
+
+    def drop_patch(self, patch: str | None) -> None:
+        "Remove an unapplied patch from the queue, without applying it."
+        patch = self.find_unapplied_patch(patch)
+        origin = self.patch_origin(patch)
+        heading = f"Dropping {patch}" + (f" (from {origin})" if origin else "")
+        with Heading(heading):
+            # the patch may have been deleted by hand, but the queue still lists it
+            self.git.cmd(["git", "rm", "--quiet", "--ignore-unmatch", patch])
+            patches = [p for p in self.qf.unapplied_patches or () if p != patch]
+            self.qf.unapplied_patches = patches or None
+            self.save_queuefile(commit_message=message("drop patch", "drop", patch))
+
+    def find_unapplied_patch(self, patch: str | None) -> str:
+        "Name an unapplied patch, defaulting to the first one."
+        if not self.qf.unapplied_patches:
+            raise UserError("No unapplied patches")
+        if not patch:
+            return self.qf.unapplied_patches[0]
+        patch = os.path.relpath(patch, self.git.directory)
+        if patch not in self.qf.unapplied_patches:
+            raise UserError(f"Not an unapplied patch: {patch}")
+        return patch
 
     def patch_origin(self, patch: str) -> str | None:
         "Describe the commit a patch file was extracted from, if it names one."

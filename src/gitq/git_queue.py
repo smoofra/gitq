@@ -160,8 +160,16 @@ class Main(continuations.Main):
         apply_parser = subs.add_parser(
             "apply",
             help="apply an unapplied patch",
+            description="Apply an unapplied patch, defaulting to the first one.",
         )
         apply_parser.add_argument("patch", nargs="?")
+        drop_parser = subs.add_parser(
+            "drop",
+            help="drop an unapplied patch",
+            description="Remove an unapplied patch from the queue without applying "
+            "it, defaulting to the first one.  The patch file is deleted.",
+        )
+        drop_parser.add_argument("patch", nargs="?")
         subs.add_parser(
             "abort",
             help="abort suspend operation",
@@ -293,6 +301,11 @@ class Main(continuations.Main):
             if args.command == "apply":
                 q = Queue(self.git, bare=DETECT)
                 q.apply_patch(args.patch)
+                return
+
+            if args.command == "drop":
+                q = Queue(self.git, bare=DETECT)
+                q.drop_patch(args.patch)
                 return
 
             if args.command in ("rebase", "add", "remove"):

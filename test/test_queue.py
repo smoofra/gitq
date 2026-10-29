@@ -311,3 +311,37 @@ def test_commit_message_from_a_file(repo: Git):
     # nothing has changed, so there is nothing to commit
     repo.s("git queue commit -m again", check_error="queue has not changed")
     assert repo.branch() == "q"
+
+
+def test_drop_patch(repo: Git):
+    repo.c("a")
+    repo.s("git branch base HEAD")
+    repo.c("b")
+    repo.c("c")
+    repo.s("git queue init base")
+
+    # make both b and c conflict with the baseline
+    repo.s("git checkout -q base")
+    repo.c("B", filename="b")
+    repo.c("C", filename="c")
+    repo.s("git checkout -q master")
+
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch; [[ $? = 2 ]]")
+    repo.s("git queue save-patch")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch", "patches/1-c.patch"]
+
+    repo.s("git queue drop patches/1-c.patch")
+    assert repo.qf.unapplied_patches == ["patches/0-b.patch"]
+    assert not (repo / "patches/1-c.patch").exists()
+    assert (repo / "patches/0-b.patch").exists()
+    assert repo.commit("HEAD").message.startswith("drop patch: patches/1-c.patch")
+
+    repo.s("git queue drop nope.patch", check_error="Not an unapplied patch")
+
+    # no argument drops the first one
+    repo.s("git queue drop")
+    assert repo.qf.unapplied_patches is None
+    assert not (repo / "patches/0-b.patch").exists()
+
+    repo.s("git queue drop", check_error="No unapplied patches")

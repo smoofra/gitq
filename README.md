@@ -164,6 +164,20 @@ Skip the current cherry-pick and then continue.
 
 Print the current operation status.
 
+### `git queue save-patch`
+
+Abort the cherry-pick that conflicted, save that commit as a patch file
+under `patches/`, record it in the queue metadata, and continue rebasing.
+
+### `git queue apply [PATCH]`
+
+Apply a saved patch, defaulting to the first unapplied one.
+
+### `git queue drop [PATCH]`
+
+Remove a saved patch from the queue without applying it, defaulting to the
+first unapplied one.  The patch file is deleted.
+
 ### `git queue tidy`
 
 Normalize and rewrite the `.git-queue` file in the current branch.
