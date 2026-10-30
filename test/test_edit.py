@@ -228,3 +228,65 @@ def test_edit_skip_not_allowed_here(repo: Git):
 
     repo.s("git edit --abort")
     assert repo.log() == ["0", "a"]
+
+
+def conflicting_stack(repo: Git, *, between: bool = False) -> None:
+    """
+    a, b, [i], c, d where b and c both touch f, so editing b conflicts with c.
+
+    With `between`, i is replayed cleanly before the conflict is reached.
+    """
+    repo.w("f", "one\ntwo\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w("f", "one\nTWO\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    if between:
+        repo.c("i")
+    repo.w("f", "one\nTWO\nTHREE")
+    repo.w("g", "ggg")
+    repo.s("git add .")
+    repo.s("git commit -q -m c")
+    repo.w("h", "hhh")
+    repo.s("git add .")
+    repo.s("git commit -q -m d")
+
+
+def half_staged_resolution(repo: Git) -> None:
+    """
+    Reach a conflict, stage a resolution, then keep editing the file.
+
+    That leaves the file changed both in the index and in the working tree,
+    which is the state `git cherry-pick --abort` refuses to roll back.
+    """
+    conflicting_stack(repo)
+    repo.s("git edit :/b; [[ $? = 2 ]]")
+    repo.w("f", "one\nBEE\nthree")
+    repo.s("git add .")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+    repo.w("f", "one\nRESOLVED\nthree")
+    repo.s("git add .")
+    repo.w("f", "one\nSTILL EDITING\nthree")
+    assert repo.so("git status --porcelain f") == "MM f"
+
+
+def test_abort_a_half_staged_resolution(repo: Git):
+    half_staged_resolution(repo)
+    sha = repo.sha(":/d")
+
+    repo.s("git edit --abort")
+
+    assert repo.sha("HEAD") == sha
+    assert not repo.so("git status --porcelain")
+    assert not (repo.gitdir / "CHERRY_PICK_HEAD").exists()
+
+
+def test_skip_a_half_staged_resolution(repo: Git):
+    half_staged_resolution(repo)
+
+    repo.s("git edit --skip")
+
+    assert repo.log() == ["a", "b", "d"]
+    assert not repo.so("git status --porcelain")
+    assert not (repo.gitdir / "CHERRY_PICK_HEAD").exists()

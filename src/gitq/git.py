@@ -489,13 +489,24 @@ class Git:
         self.cmd(["git", "read-tree", "--empty"])
 
     def cherry_pick_abort(self) -> None:
-        if self.cherry_pick_in_progress:
-            if self.on_orphan_branch():
-                Output.log_cmd(["rm", self.gitdir / "CHERRY_PICK_HEAD"])
-                (self.gitdir / "CHERRY_PICK_HEAD").unlink()
-                self.delete_index_and_files()
-            else:
-                self.cmd(["git", "cherry-pick", "--abort"])
+        if not self.cherry_pick_in_progress:
+            return
+        if self.on_orphan_branch():
+            Output.log_cmd(["rm", self.gitdir / "CHERRY_PICK_HEAD"])
+            (self.gitdir / "CHERRY_PICK_HEAD").unlink()
+            self.delete_index_and_files()
+            return
+        try:
+            self.cmd(["git", "cherry-pick", "--abort"])
+        except GitFailed:
+            # --abort rolls back with a merge-style reset, which refuses with
+            # "Entry '<path>' not uptodate" when a file has both staged and
+            # unstaged changes -- a resolution the user staged and then kept
+            # editing.  We are throwing the cherry-pick away either way, and a
+            # conflicted pick never moved HEAD, so take the tree back by force.
+            Output.print("# cherry-pick --abort refused; resetting instead")
+            self.cmd(["git", "cherry-pick", "--quit"])
+            self.cmd(["git", "reset", "--hard", "HEAD"])
 
     def has_unmerged_files(self) -> bool:
         return bool(self.cmd(["git", "ls-files", "--unmerged"], quiet=True).strip())
