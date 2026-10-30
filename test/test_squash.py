@@ -173,3 +173,22 @@ def test_squash_up_fixup(repo: Git):
     repo.s("git squash --up --fixup :/b")
     assert "".join(repo.log()) == "ac"
     assert repo.commit("HEAD").message == "c\n"
+
+
+def test_squash_drops_the_defer_marks(repo: Git):
+    """
+    A defer commit swapped up the stack and squashed into place must leave an
+    ordinary commit behind -- not one the tools go on treating as a checkpoint.
+    """
+    repo.c("a")
+    repo.c("b")
+    repo.w("msg.txt", "\N{PUSHPIN} b\n\nGitQ-Type: defer")
+    repo.s("git commit -q --amend -F msg.txt")
+    assert repo.commit("HEAD").gitq_type == "defer"
+
+    repo.s("EDITOR=false git squash --no-edit HEAD")
+
+    # neither the trailer the tools read, nor the mark a person reads
+    assert repo.log() == ["a"]
+    assert repo.commit("HEAD").gitq_type is None
+    assert repo.commit("HEAD").message == "a\n\nb\n"

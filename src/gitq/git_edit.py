@@ -7,7 +7,15 @@ from typing import Iterator
 from dataclasses import dataclass
 
 from . import continuations
-from .continuations import Continuation, EditBranch, Suspend, Abort, Skip, check_unstaged
+from .continuations import (
+    Continuation,
+    EditBranch,
+    Suspend,
+    Abort,
+    Skip,
+    Defer,
+    check_unstaged,
+)
 from .git_swap import edit_commit
 from .output import Output
 
@@ -20,6 +28,11 @@ COMMIT back on top.
 Any changes still staged when you continue are amended into COMMIT.  If the
 working tree is dirty, git-edit suspends again so you can stage or discard
 those changes first.
+
+If replaying a commit conflicts, --defer puts the conflict down as a commit
+of its own, so that commit and everything above it apply unchanged.  The
+deferred commit is the inverse of the edit that caused the conflict: swap it
+up the stack to deal with it where it belongs.
 """
 
 
@@ -69,6 +82,11 @@ class Main(continuations.Main):
             action="store_true",
             help="drop the conflicting commit and continue",
         )
+        parser.add_argument(
+            "--defer",
+            action="store_true",
+            help="put the conflict down as a commit of its own, and continue",
+        )
         parser.add_argument("--status", action="store_true", help="print status")
         args = parser.parse_args()
 
@@ -81,6 +99,9 @@ class Main(continuations.Main):
 
         if args.skip:
             self.resume(Skip())
+
+        if args.defer:
+            self.resume(Defer())
 
         if args.status:
             self.status()

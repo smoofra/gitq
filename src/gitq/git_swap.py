@@ -16,10 +16,19 @@ from .continuations import (
     PickCherries,
     Resume,
     Heading,
+    undefer_message,
 )
 from . import continuations
 from .output import Output
-from .git import Git, UserError, GitFailed, MergeFound, split_author, Commit, Sha
+from .git import (
+    Git,
+    UserError,
+    GitFailed,
+    MergeFound,
+    split_author,
+    Commit,
+    Sha,
+)
 from .queue import Queue, DETECT
 
 description = """Swaps COMMIT with COMMIT^ (i.e. moves COMMIT one step earlier in history),
@@ -158,9 +167,9 @@ class OrSquash(Continuation):
                     if squash.message:
                         f.write(squash.message)
                     else:
-                        f.write(B.message)
+                        f.write(undefer_message(B.message))
                         f.write("\n\n")
-                        f.write(A.message)
+                        f.write(undefer_message(A.message))
                 cmd = ["git", "commit", "--allow-empty", "-F", message]
                 if squash.edit:
                     cmd.append("--edit")

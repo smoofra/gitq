@@ -17,7 +17,7 @@ from .queue import (
     NotAQueue,
 )
 from .output import Output
-from .continuations import Abort, UserError, Heading, Skip, SavePatch
+from .continuations import Abort, UserError, Heading, Skip, SavePatch, Defer
 from . import continuations
 
 
@@ -152,6 +152,13 @@ class Main(continuations.Main):
             description="Skip the current commit and continue.",
         )
         subs.add_parser(
+            "defer",
+            help="put the conflict down as a commit of its own, and continue",
+            description="Commit the content the conflicting commit was written against, "
+            "so it and everything above it apply unchanged.  The deferred commit is the "
+            "inverse of the change that conflicted; swap it up the stack to deal with it.",
+        )
+        subs.add_parser(
             "save-patch",
             help="save the conflicting commit as a patch and continue the rebase",
             description="Abort the current cherry-pick, save the commit as a .patch file "
@@ -221,6 +228,9 @@ class Main(continuations.Main):
 
         if args.command == "skip":
             self.resume(Skip())
+
+        if args.command == "defer":
+            self.resume(Defer())
 
         if args.command == "save-patch":
             self.resume(SavePatch())

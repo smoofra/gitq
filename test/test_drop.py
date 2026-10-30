@@ -90,3 +90,37 @@ def test_drop_conflict_with_unstaged_changes(repo: Git):
     assert repo.r("other") == "work in progress"
     assert repo.r("shared") == "resolved"
     assert repo.is_clean()
+
+
+def conflicting_drop(repo: Git) -> None:
+    """
+    a, b, c where dropping b makes c conflict.
+    """
+    repo.w("f", "one\ntwo\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m a")
+    repo.w("f", "one\nTWO\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m b")
+    repo.w("f", "one\nTWO\nTHREE")
+    repo.s("git add .")
+    repo.s("git commit -q -m c")
+    repo.s("git drop :/b; [[ $? = 2 ]]")
+    assert "Resolve the conflicts" in repo.so("git drop --status")
+
+
+def test_drop_skip(repo: Git):
+    conflicting_drop(repo)
+    repo.s("git drop --skip")
+    assert repo.log() == ["a"]
+    assert (repo / "f").read_text() == "one\ntwo\nthree\n"
+
+
+def test_drop_defer(repo: Git):
+    conflicting_drop(repo)
+    repo.s("git drop --defer")
+
+    assert repo.log() == ["a", "📌 defer conflict with c", "c"]
+    assert repo.commit(":/defer").gitq_type == "defer"
+    # c applied unchanged, which is the whole point
+    assert (repo / "f").read_text() == "one\nTWO\nTHREE\n"

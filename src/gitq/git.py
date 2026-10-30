@@ -88,6 +88,9 @@ class StatusEntry(NamedTuple):
     orig_path: Optional[str]  # set for renames/copies
 
 
+# The trailer that marks a commit as one this tool made, and says what for.
+GITQ_TYPE = "GitQ-Type"
+
 # Unmerged `git status --porcelain` codes, with the descriptions git itself uses.
 CONFLICT_DESCRIPTIONS = {
     "DD": "both deleted",
@@ -203,6 +206,11 @@ class Commit(object):
             subprocess.run(cmd, check=True, stdout=f, cwd=self.git.directory, env=self.git.env)
         return path
 
+    @property
+    def gitq_type(self) -> str | None:
+        "What this tool made the commit for, or None if it didn't make it."
+        return self.trailers().get(GITQ_TYPE)
+
     def trailers(self) -> dict[str, str]:
         "parse RFC822 trailers from commit message"
         paragraphs = self.message.strip().split("\n\n")
@@ -228,6 +236,12 @@ def looks_like_trailers(s: str) -> bool:
         else:
             return False
     return seen
+
+
+def strip_trailer(message: str, key: str) -> str:
+    "Remove any `key:` trailer lines from a commit message."
+    kept = [line for line in message.splitlines() if not re.match(rf"{re.escape(key)}:\s", line)]
+    return "\n".join(kept).rstrip() + "\n"
 
 
 def add_trailer(message: str, key: str, value: str):

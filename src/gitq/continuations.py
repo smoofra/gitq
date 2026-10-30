@@ -1,3 +1,4 @@
+import re
 import sys
 import yaml
 from typing import (
@@ -8,6 +9,7 @@ from typing import (
     Generic,
     Iterator,
     NoReturn,
+    Sequence,
     Type,
     Tuple,
 )
@@ -18,7 +20,19 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 
 from .output import Output
-from .git import Git, UserError, GitFailed, Commit, Sha, Ref, Branch
+from .git import (
+    Git,
+    UserError,
+    GitFailed,
+    MergeFound,
+    Commit,
+    Sha,
+    Ref,
+    Branch,
+    GITQ_TYPE,
+    add_trailer,
+    strip_trailer,
+)
 from .yaml import YAMLObject, BaseLoader, contextGit
 
 
@@ -416,7 +430,11 @@ class PickCherries(Continuation):
         yield
         while self.cherries:
             cherry, *self.cherries = self.cherries
-            cherry_pick(self.git.commit(cherry), edit=self.edit, git=self.git)
+            commit = self.git.commit(cherry)
+            if is_defer(commit):
+                carry_tree_forward(commit, git=self.git)
+            else:
+                cherry_pick(commit, edit=self.edit, git=self.git)
 
 
 class Skip(Resume):
@@ -430,6 +448,105 @@ class SavePatch(Resume):
     Raised into a resume stack to save the current cherry-pick commit as a patch
     file and continue with remaining commits.
     """
+
+
+class Defer(Resume):
+    """
+    Raised into a resume stack to put the current conflict down as a commit of
+    its own, so the cherry can be applied unchanged.
+    """
+
+
+DEFER_TYPE = "defer"
+
+# marks a deferred commit in `git log`, where the trailer is not visible
+DEFER_MARK = "\N{PUSHPIN}"
+
+defer_message = """\
+{mark} defer conflict with {title}
+
+{abbrev} conflicts here, so this restores the content it was written
+against.  It and everything above now apply with their original deltas.
+
+This commit is the inverse of the change that caused the conflict.  Swap
+it up the stack to put it where it belongs.
+"""
+
+
+def undefer_message(message: str) -> str:
+    """
+    Strip what marks a message as a defer commit's.
+
+    For when two commits are combined into one: the result is an ordinary
+    commit, whatever went into it, and should neither be treated as a
+    checkpoint nor read like one.
+    """
+    message = re.sub(rf"^{re.escape(DEFER_MARK)} ", "", message, flags=re.MULTILINE)
+    return strip_trailer(message, GITQ_TYPE)
+
+
+def is_defer(commit: Commit) -> bool:
+    "True if this commit pins a tree, rather than carrying a delta."
+    return commit.gitq_type == DEFER_TYPE
+
+
+def restore_tree(ref: Sha, *, git: Git, keep: Sequence[str] = ()) -> None:
+    """
+    Put the index and working tree back to `ref`'s tree.
+
+    `keep` names paths to hold at their current content instead.  It is for a
+    tool's own bookkeeping, which is not part of the history being replayed.
+    """
+    head = git.sha("HEAD")
+    git.checkout_tree(ref)
+    for path in keep:
+        if git.ref_exists(f"{head}:{path}"):
+            git("checkout", head, "--", path)
+
+
+def defer_conflict(ref: Sha, *, git: Git, keep: Sequence[str] = ()) -> None:
+    """
+    Commit the tree the conflicting cherry was written against, so that it
+    applies with its original delta.
+
+    Everything above replays unchanged too: each cherry then lands on exactly
+    its own parent's content.  What the conflict was really about ends up in
+    this one commit, which the user can swap up the stack at their leisure.
+    """
+    cherry = git.commit(ref)
+    if not cherry.parents:
+        raise UserError(f"Cannot defer: {cherry.summary} is a root commit")
+    try:
+        parent = git.unique_parent(cherry)
+    except MergeFound as e:
+        raise UserError(f"Cannot defer: {e}") from e
+
+    restore_tree(parent.sha, git=git, keep=keep)
+
+    if not git.has_staged_changes():
+        raise UserError(f"Nothing to defer: {cherry.summary} already applies")
+
+    message = defer_message.format(mark=DEFER_MARK, title=cherry.title, abbrev=cherry.abbrev)
+    git.cmd(["git", "commit", "--quiet", "-m", add_trailer(message, GITQ_TYPE, DEFER_TYPE)])
+    cherry_pick(cherry, git=git)
+
+
+def carry_tree_forward(commit: Commit, *, git: Git, keep: Sequence[str] = ()) -> None:
+    """
+    Re-create `commit` by restoring its tree, rather than replaying its delta.
+
+    A defer commit records the content the commits above it were written
+    against, so its delta is only meaningful where it was made.   Replaying it
+    as a diff would conflict with whatever changed below; putting its tree back
+    exactly is what makes everything above it apply unchanged, which is the
+    whole point of having deferred the conflict in the first place.
+    """
+    with Heading(f"Carrying forward {commit.summary}", quiet=True):
+        restore_tree(commit.sha, git=git, keep=keep)
+        git.cmd(
+            ["git", "commit", "--quiet", "--allow-empty", "--reuse-message", commit.sha],
+            comment=commit.title,
+        )
 
 
 def check_unstaged(git: Git) -> None:
@@ -476,10 +593,14 @@ class CherryPickContinue(Continuation):
     @contextmanager
     def impl(self) -> Iterator[None]:
         try:
-            with handles(Skip):
+            with handles(Skip, Defer):
                 yield
         except Skip:
             self.git.cherry_pick_abort()
+            return
+        except Defer:
+            self.git.cherry_pick_abort()
+            defer_conflict(self.ref, git=self.git)
             return
         except (Exception, Resume):
             self.git.cherry_pick_abort()

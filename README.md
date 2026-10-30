@@ -160,6 +160,26 @@ Abort a suspended operation and restore git to its previous state.
 
 Skip the current cherry-pick and then continue.
 
+### `git queue defer`
+
+Put the current conflict down as a commit of its own, and continue.
+
+Commits the content the conflicting commit was written against, so that it and
+every commit above it apply with their original deltas.  The deferred commit is
+the inverse of the change that conflicted — Either swap it up the stack with
+`git-swap` and then squash it into an appropriate commit, or drop later it with
+`git-drop` to try the rebase again from where the conflict occurred.
+
+Defer commits are marked with `GitQ-Type: defer` trailer, and they are treated
+differently when replayed: rather than cherry-picking its delta,
+`git-queue rebase` restore its tree exactly, whatever happened below it.
+A defer commit acts like a checkpoint.  When rebasing, commits above it do not
+see changes that happen below it.
+
+Defer commits do not pin the the queue's own bookkeeping — `.git-queue` and
+`patches/` stay as the rebase left them.
+
+
 ### `git queue status`
 
 Print the current operation status.
@@ -224,6 +244,25 @@ is, and `--message`/`-m` or `--file`/`-F` replace it without an editor.
 
 `git-edit` checks out a specific commit for editing, then replays everything
 above it when you continue — similar to `git rebase -i` with `edit`.
+
+If replaying a commit conflicts, `--skip` drops it, and `--defer` puts the
+conflict down as a commit of its own:
+
+```
+  d4f1a2c  commit C                 <- applied unchanged, same delta as before
+  9e03bb1  📌 defer conflict with C <- the content C expects
+  3bc7710  X'                       <- the commit you edited
+```
+
+`--defer` restores exactly the content that C was written against.  This means
+every commit above it also lands on exactly its own parent's content, so the tip
+of the stack remains unchanged.   If that's what you want, then swap the
+deferred commit up the stack and squash it into an appropriate place.
+
+If that's not what you want, use `git-drop` to drop the defer commit to try
+again, or edit, swap, and squash it into shape.
+
+
 
 
 ## `git-split`

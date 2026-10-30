@@ -11,7 +11,7 @@ import re
 import yaml
 
 from .output import Output
-from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch
+from .git import Git, Commit, GitFailed, UserError, Sha, Ref, Branch, GITQ_TYPE
 from .continuations import (
     EditBranch,
     Step,
@@ -25,6 +25,10 @@ from .continuations import (
     handles,
     SavePatch,
     Skip,
+    Defer,
+    defer_conflict,
+    carry_tree_forward,
+    is_defer,
     check_unstaged,
     finish_cherry_pick,
 )
@@ -131,11 +135,11 @@ Continuation.register(Baseline)
 Continuation.register(QueueFile)
 Continuation.register(RebaseOptions)
 
-CommitType = Literal["baseline", "update-queuefile", "save-patch", "apply", "drop"]
+CommitType = Literal["baseline", "update-queuefile", "save-patch", "apply", "drop", "defer"]
 
 
 def message(m: str, type: CommitType, title: str | None = None):
-    trailers = f"GitQ-Type: {type}"
+    trailers = f"{GITQ_TYPE}: {type}"
     if title:
         return f"{m}: {title}\n\n{trailers}"
     else:
@@ -146,7 +150,7 @@ def from_this_tool(c: Commit) -> bool:
     trailers = c.trailers()
     if trailers.get("Tool") == "gitq":
         return True  # Old trailers.  TODO remove this
-    return bool(trailers.get("GitQ-Type"))
+    return bool(trailers.get(GITQ_TYPE))
 
 
 def is_merged_baseline(c: Commit) -> bool:
@@ -345,7 +349,7 @@ class Queue:
                 for p in c.parents:
                     baseline_shas.add(p)
                 continue
-            if c.is_merge or from_this_tool(c):
+            if c.is_merge or (from_this_tool(c) and not is_defer(c)):
                 return False
         return True
 
@@ -367,7 +371,8 @@ class Queue:
         for commit in commits:
             if commit.sha in user_merges:
                 continue
-            if from_this_tool(commit):
+            # a defer commit is one of ours, but it is also queue content
+            if from_this_tool(commit) and not is_defer(commit):
                 continue
             if commit.is_merge:
                 if git.is_conflicted(commit):
@@ -451,6 +456,14 @@ class Queue:
     @property
     def patches_directory(self) -> Path:
         return self.git.directory / "patches"
+
+    @property
+    def bookkeeping_paths(self) -> List[str]:
+        "Paths holding the queue's own state, rather than the content being replayed."
+        return [
+            str(path.relative_to(self.git.directory))
+            for path in (self.queuefile_path, self.patches_directory)
+        ]
 
     def write_commits(self) -> Iterator[Path]:
         os.makedirs(self.commits_directory, exist_ok=True)
@@ -736,7 +749,7 @@ class QueueCherryPickContinue(Continuation):
 
     @contextmanager
     def impl(self) -> Iterator:
-        with handles(Skip, SavePatch):
+        with handles(Skip, SavePatch, Defer):
             yield from self.body()
 
     def body(self) -> Iterator:
@@ -744,6 +757,11 @@ class QueueCherryPickContinue(Continuation):
             yield
         except Skip:
             self.git.cherry_pick_abort()
+            return
+        except Defer:
+            keep = Queue(self.git, bare=self.bare).bookkeeping_paths
+            self.git.cherry_pick_abort()
+            defer_conflict(self.ref, git=self.git, keep=keep)
             return
         except SavePatch:
             q = Queue(self.git, bare=self.bare)
@@ -782,6 +800,10 @@ class QueuePickCherries(Continuation):
         while self.cherries:
             cherry, *self.cherries = self.cherries
             commit = self.git.commit(cherry)
+            if is_defer(commit):
+                keep = Queue(self.git, bare=self.bare).bookkeeping_paths
+                carry_tree_forward(commit, git=self.git, keep=keep)
+                continue
             with Heading(f"Cherry picking {commit.summary}", quiet=True):
                 try:
                     self.git.cmd(

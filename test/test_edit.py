@@ -253,6 +253,56 @@ def conflicting_stack(repo: Git, *, between: bool = False) -> None:
     repo.s("git commit -q -m d")
 
 
+def test_edit_defer(repo: Git):
+    conflicting_stack(repo)
+    tip = repo.sha("HEAD^{tree}")
+    before = {c: repo.so(f"git show --format= :/{c}") for c in "cd"}
+
+    repo.s("git edit :/b; [[ $? = 2 ]]")
+    repo.w("f", "one\nBEE\nthree")
+    repo.s("git add .")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+
+    repo.s("git edit --defer")
+
+    assert repo.log() == ["a", "b", "📌 defer conflict with c", "c", "d"]
+
+    # the point of the whole exercise: c and d applied unchanged
+    for c in "cd":
+        assert repo.so(f"git show --format= :/{c}") == before[c]
+
+    # so the deferred commit is the exact inverse of the edit
+    assert repo.sha("HEAD^{tree}") == tip
+    assert repo.commit(":/defer").message.startswith("📌 defer conflict with c\n")
+    assert not repo.so("git status --porcelain")
+
+
+def test_edit_defer_above_the_first_cherry(repo: Git):
+    "the commit that conflicts is not the first one replayed"
+    conflicting_stack(repo, between=True)
+    assert repo.log() == ["a", "b", "i", "c", "d"]
+    before = {c: repo.so(f"git show --format= :/{c}") for c in "cd"}
+
+    repo.s("git edit :/b; [[ $? = 2 ]]")
+    repo.w("f", "one\nBEE\nthree")
+    repo.s("git add .")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+
+    # i replayed cleanly; c is the one that conflicts
+    repo.s("git edit --defer")
+    assert repo.log() == ["a", "b", "i", "📌 defer conflict with c", "c", "d"]
+    for c in "cd":
+        assert repo.so(f"git show --format= :/{c}") == before[c]
+
+
+def test_edit_defer_is_not_allowed_without_a_conflict(repo: Git):
+    repo.c("a")
+    repo.c("b")
+    repo.s("git edit :/a; [[ $? = 2 ]]")
+    repo.s("git edit --defer", check_error="resume is not allowed here")
+    repo.s("git edit --abort")
+
+
 def half_staged_resolution(repo: Git) -> None:
     """
     Reach a conflict, stage a resolution, then keep editing the file.
@@ -314,3 +364,26 @@ def test_edit_with_untracked_files_in_the_way(repo: Git):
     assert repo.sha("HEAD") == head
     assert (repo / "vendor/go.mod").read_text() == "module local\n"
     assert repo.so("git status --porcelain") == "?? vendor/"
+
+
+def test_edit_below_a_defer_commit(repo: Git):
+    "a defer commit pins its tree, so nothing below it can reach past it"
+    conflicting_stack(repo)
+    # `:/a` would match the defer commit's message once it exists
+    root = repo.sha("HEAD~3")
+    repo.s("git edit :/b; [[ $? = 2 ]]")
+    repo.w("f", "one\nBEE\nthree")
+    repo.s("git add .")
+    repo.s("git edit --continue; [[ $? = 2 ]]")
+    repo.s("git edit --defer")
+    tip = repo.sha("HEAD^{tree}")
+    assert repo.commit(":/defer").gitq_type == "defer"
+
+    repo.s(f"git edit {root}; [[ $? = 2 ]]")
+    repo.w("unrelated", "x")
+    repo.s("git add .")
+    repo.s("git edit --continue")
+
+    assert repo.log() == ["a", "b", "📌 defer conflict with c", "c", "d"]
+    assert repo.sha("HEAD^{tree}") == tip
+    assert not (repo / "unrelated").exists()

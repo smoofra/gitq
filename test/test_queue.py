@@ -345,3 +345,129 @@ def test_drop_patch(repo: Git):
     assert not (repo / "patches/0-b.patch").exists()
 
     repo.s("git queue drop", check_error="No unapplied patches")
+
+
+def conflicting_queue(repo: Git, *, bare: str = "") -> None:
+    "A queue whose first patch conflicts with an upstream change to the baseline."
+    repo.w("f", "one\ntwo\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m base0")
+    repo.s("git branch base HEAD")
+    repo.w("f", "one\nTWO\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m 'patch one'")
+    repo.c("p2")
+    repo.s(f"git queue init {bare} base")
+
+    repo.s("git checkout -q base")
+    repo.w("f", "ONE\ntwo\nthree\nfour")
+    repo.s("git add .")
+    repo.s("git commit -q -m upstream")
+    repo.s("git checkout -q master")
+
+
+def test_queue_defer(repo: Git):
+    conflicting_queue(repo)
+    before = repo.so("git show --format= :/'patch one'")
+
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue defer")
+
+    assert repo.log() == [
+        "base0",
+        "upstream",
+        "baseline",
+        "📌 defer conflict with patch one",
+        "patch one",
+        "p2",
+    ]
+    assert repo.so("git show --format= :/'patch one'") == before
+
+    # the rebase's own bookkeeping is not reverted: the queuefile still names
+    # the baseline we just rebased onto
+    assert repo.qf.baselines[0].sha == repo.sha(":/upstream")
+
+    # and the deferred commit is an ordinary patch, not a tool commit
+    repo.s("git checkout -q base")
+    repo.c("later upstream")
+    repo.s("git checkout -q master")
+    repo.s("git queue rebase")
+    assert "📌 defer conflict with patch one" in repo.log()
+
+
+def test_queue_defer_bare(repo: Git):
+    "a bare queue keeps its metadata in config, so there is no queuefile to keep"
+    conflicting_queue(repo, bare="--bare")
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue defer")
+
+    assert repo.log() == [
+        "base0",
+        "upstream",
+        "📌 defer conflict with patch one",
+        "patch one",
+        "p2",
+    ]
+    assert repo.qf.baselines[0].sha == repo.sha(":/upstream")
+    assert not (repo / ".git-queue").exists()
+
+
+def test_queue_defer_keeps_a_patch_saved_earlier(repo: Git):
+    "save-patch and defer in the same rebase: the patch file must survive"
+    repo.w("f", "one\ntwo\nthree")
+    repo.w("g", "g1")
+    repo.s("git add .")
+    repo.s("git commit -q -m base0")
+    repo.s("git branch base HEAD")
+    repo.w("f", "one\nTWO\nthree")
+    repo.s("git add .")
+    repo.s("git commit -q -m 'patch one'")
+    repo.w("g", "G1")
+    repo.s("git add .")
+    repo.s("git commit -q -m 'patch two'")
+    repo.s("git queue init base")
+
+    # upstream conflicts with both patches
+    repo.s("git checkout -q base")
+    repo.w("f", "ONE\ntwo\nthree\nfour")
+    repo.w("g", "gX")
+    repo.s("git add .")
+    repo.s("git commit -q -m upstream")
+    repo.s("git checkout -q master")
+
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue save-patch; [[ $? = 2 ]]")
+    repo.s("git queue defer")
+
+    assert repo.qf.unapplied_patches == ["patches/0-patch-one.patch"]
+    assert (repo / "patches/0-patch-one.patch").exists()
+    assert repo.qf.baselines[0].sha == repo.sha(":/upstream")
+    assert repo.log()[-2:] == ["📌 defer conflict with patch two", "patch two"]
+
+
+def test_queue_defer_pins_the_tree_on_a_later_rebase(repo: Git):
+    conflicting_queue(repo)
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git queue defer")
+    patch = repo.so("git show --format= :/'patch one'")
+    before = repo.sha("HEAD")
+    assert repo.commit(":/defer").gitq_type == "defer"
+
+    # upstream moves again, in a way that would conflict all over again
+    repo.s("git checkout -q base")
+    repo.w("f", "ONE\nTWO\nTHREE\nfour")
+    repo.s("git add .")
+    repo.s("git commit -q -m upstream2")
+    repo.s("git checkout -q master")
+
+    repo.s("git queue rebase")
+
+    # the defer commit is still a patch, carried forward as a tree rather than
+    # a delta, so nothing above it had anything to merge
+    assert repo.log()[-3:] == ["📌 defer conflict with patch one", "patch one", "p2"]
+    assert repo.so("git show --format= :/'patch one'") == patch
+
+    # the only thing the new baseline got to change is the queue's own
+    # bookkeeping; the pinned tree carried everything else through untouched
+    assert repo.so(f"git diff --name-only {before} HEAD") == ".git-queue"
+    assert repo.qf.baselines[0].sha == repo.sha(":/upstream2")
