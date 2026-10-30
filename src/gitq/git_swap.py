@@ -52,10 +52,14 @@ class Squash(Resume):
     back onto the branch.
     """
 
-    def __init__(self, *, message: str = "", edit: bool = True) -> None:
+    def __init__(self, *, message: str = "", edit: bool = True, up: bool = False) -> None:
         super().__init__()
         self.message = message
         self.edit = edit
+        # `up` means the earlier commit is being squashed into the later one.
+        # The destination is the commit that survives, so it is the later one
+        # whose authorship the result carries.
+        self.up = up
 
 
 class Fixup(Resume):
@@ -64,6 +68,10 @@ class Fixup(Resume):
     the most recent swap operation with a fixup, and then push everything
     back onto the branch.
     """
+
+    def __init__(self, *, up: bool = False) -> None:
+        super().__init__()
+        self.up = up
 
 
 def add_message_args(parser: argparse.ArgumentParser, *no_edit_aliases: str) -> None:
@@ -87,13 +95,13 @@ def given_message(args) -> bool:
     return bool(args.message or args.file or args.no_edit_message)
 
 
-def squash_from_args(args) -> Squash:
+def squash_from_args(args, *, up: bool = False) -> Squash:
     message = args.message
     if args.file:
         with open(args.file, "r") as f:
             message = f.read()
     # a message of your own means there is nothing left to edit
-    return Squash(message=message, edit=not (message or args.no_edit_message))
+    return Squash(message=message, edit=not (message or args.no_edit_message), up=up)
 
 
 @dataclass
@@ -127,13 +135,15 @@ class OrSquash(Continuation):
         try:
             with handles(Fixup, Squash):
                 yield
-        except Fixup:
+        except Fixup as fixup:
             A = self.git.commit(self.head)
             B = self.git.unique_parent(A)
             C = self.git.unique_parent_or_root(B)
             with checkout_baseline(C.sha if C else None, git=self.git):
                 self.git.checkout_tree(A.sha)
-                self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", B.sha])
+                # --reuse-message brings the authorship along with the message
+                keep = A if fixup.up else B
+                self.git.cmd(["git", "commit", "--allow-empty", "--reuse-message", keep.sha])
             if self.stop:
                 raise Stop
         except Squash as squash:
@@ -142,7 +152,7 @@ class OrSquash(Continuation):
             C = self.git.unique_parent_or_root(B)
             with checkout_baseline(C.sha if C else None, git=self.git):
                 self.git.checkout_tree(A.sha)
-                author = split_author(B.author)
+                author = split_author((A if squash.up else B).author)
                 message = self.git.gitdir / "COMMIT_EDITMSG"
                 with open(message, "w") as f:
                     if squash.message:

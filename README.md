@@ -236,9 +236,15 @@ the final content constant.
 
 `git-squash` squashes a commit into its parent.
 
+With `--up` it squashes the commit into the one *after* it instead.  The
+commit being squashed into is the one that survives, so `--up` keeps the
+author of the later of the two commits, where a plain squash keeps the
+earlier one's.  The earlier message still comes first either way.
+
 The combined message is opened in your editor; `--no-edit` keeps it as is,
 and `--message`/`-m` or `--file`/`-F` replace it without an editor.  With
-`--fixup`/`-f` the commit's message is discarded and the parent's kept.
+`--fixup`/`-f` the message of the commit being squashed is discarded, and
+only the message of the one it is squashed into is kept.
 
 
 ## `git-drop`

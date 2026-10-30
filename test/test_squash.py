@@ -115,3 +115,61 @@ def test_squash_message_not_with_fixup(repo: Git):
     abc(repo)
     # argparse errors go to stderr
     repo.s("git squash -f -m x :/c 2>&1", check_error="not used with --fixup")
+
+
+def test_squash_up(repo: Git):
+    for c in "abcd":
+        repo.c(c)
+    sha = repo.sha("HEAD")
+
+    # b and c become one commit, carrying b's message first
+    repo.s("EDITOR=false git squash --up --no-edit :/b")
+    assert "".join(repo.log()) == "abd"
+    assert repo.commit("HEAD^").message == "b\n\nc\n"
+    assert repo.t(f"git diff --quiet {sha} HEAD")
+
+
+def two_authors(repo: Git) -> None:
+    repo.s("git -c user.name=Bottom -c user.email=b@e commit -q --allow-empty -m bottom")
+    repo.s("git -c user.name=Top -c user.email=t@e commit -q --allow-empty -m top")
+
+
+def test_squash_up_keeps_the_later_author(repo: Git):
+    "--up squashes into the later commit, so that is the one that survives"
+    two_authors(repo)
+    repo.s("EDITOR=false git squash --up --no-edit :/bottom")
+    assert repo.log() == ["bottom"]
+    assert repo.commit("HEAD").author.startswith("Top <t@e>")
+    assert repo.commit("HEAD").message == "bottom\n\ntop\n"
+
+
+def test_squash_down_keeps_the_earlier_author(repo: Git):
+    "...whereas squashing the same pair downwards keeps the earlier one"
+    two_authors(repo)
+    repo.s("EDITOR=false git squash --no-edit :/top")
+    assert repo.log() == ["bottom"]
+    assert repo.commit("HEAD").author.startswith("Bottom <b@e>")
+    assert repo.commit("HEAD").message == "bottom\n\ntop\n"
+
+
+def test_squash_up_fixup_keeps_the_later_message(repo: Git):
+    two_authors(repo)
+    repo.s("git squash --up --fixup :/bottom")
+    assert repo.log() == ["top"]
+    assert repo.commit("HEAD").author.startswith("Top <t@e>")
+    assert repo.commit("HEAD").message == "top\n"
+
+
+def test_squash_up_at_head(repo: Git):
+    for c in "ab":
+        repo.c(c)
+    repo.s("git squash --up HEAD", check_error="already at HEAD")
+
+
+def test_squash_up_fixup(repo: Git):
+    for c in "abc":
+        repo.c(c)
+    # b is squashed into c, so c's message is the one kept
+    repo.s("git squash --up --fixup :/b")
+    assert "".join(repo.log()) == "ac"
+    assert repo.commit("HEAD").message == "c\n"
