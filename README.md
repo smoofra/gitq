@@ -222,6 +222,10 @@ the final content constant.
 
 `git-squash` squashes a commit into its parent.
 
+The combined message is opened in your editor; `--no-edit` keeps it as is,
+and `--message`/`-m` or `--file`/`-F` replace it without an editor.  With
+`--fixup`/`-f` the commit's message is discarded and the parent's kept.
+
 
 ## `git-drop`
 

@@ -66,6 +66,36 @@ class Fixup(Resume):
     """
 
 
+def add_message_args(parser: argparse.ArgumentParser, *no_edit_aliases: str) -> None:
+    "Add the options that say what the squashed commit message should be."
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--message", "-m", default="", help="commit message for the squash")
+    group.add_argument(
+        "--file", "-F", default="", help="read the squash commit message from this file"
+    )
+    group.add_argument(
+        *no_edit_aliases,
+        "--no-edit-message",
+        action="store_true",
+        dest="no_edit_message",
+        help="keep the combined message instead of editing it",
+    )
+
+
+def given_message(args) -> bool:
+    "True if the user said anything about the squashed commit message."
+    return bool(args.message or args.file or args.no_edit_message)
+
+
+def squash_from_args(args) -> Squash:
+    message = args.message
+    if args.file:
+        with open(args.file, "r") as f:
+            message = f.read()
+    # a message of your own means there is nothing left to edit
+    return Squash(message=message, edit=not (message or args.no_edit_message))
+
+
 @dataclass
 class PickCherryWithReference(Continuation):
     """
@@ -297,18 +327,7 @@ class Main(continuations.Main):
         parser.add_argument(
             "--squash", action="store_true", help="squash instead of completing this swap"
         )
-        message_args = parser.add_mutually_exclusive_group()
-        message_args.add_argument(
-            "--message", "-m", default="", help="commit message for --squash"
-        )
-        message_args.add_argument(
-            "--file", "-F", default="", help="read the --squash commit message from this file"
-        )
-        message_args.add_argument(
-            "--no-edit-message",
-            action="store_true",
-            help="with --squash, keep the combined message instead of editing it",
-        )
+        add_message_args(parser)
         parser.add_argument(
             "--fixup", action="store_true", help="fixup instead of completing this swap"
         )
@@ -339,11 +358,7 @@ class Main(continuations.Main):
         if sum(bool(x) for x in mode_args) > 1:
             parser.error("use only one of --continue, --abort, --stop, --status, or --squash")
 
-        message = args.message
-        if args.file:
-            with open(args.file, "r") as f:
-                message = f.read()
-        if (message or args.no_edit_message) and not args.squash:
+        if given_message(args) and not args.squash:
             parser.error("--message, --file and --no-edit-message are only for --squash")
 
         if args.status:
@@ -357,8 +372,7 @@ class Main(continuations.Main):
             elif args.stop:
                 resume = Stop()
             elif args.squash:
-                # a message of your own means there is nothing left to edit
-                resume = Squash(message=message, edit=not (message or args.no_edit_message))
+                resume = squash_from_args(args)
             elif args.fixup:
                 resume = Fixup()
             self.resume(resume)
