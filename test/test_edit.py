@@ -290,3 +290,27 @@ def test_skip_a_half_staged_resolution(repo: Git):
     assert repo.log() == ["a", "b", "d"]
     assert not repo.so("git status --porcelain")
     assert not (repo.gitdir / "CHERRY_PICK_HEAD").exists()
+
+
+def test_edit_with_untracked_files_in_the_way(repo: Git):
+    repo.c("a")
+    repo.s("mkdir vendor")
+    repo.w("vendor/go.mod", "module x")
+    repo.s("git add .")
+    repo.s("git commit -q -m vendored")
+    target = repo.sha("HEAD")
+    repo.s("git rm -q -r --cached vendor && rm -rf vendor")
+    repo.s("git commit -q -m unvendored")
+    repo.c("c")
+    head = repo.sha("HEAD")
+
+    # the file is back in the working tree, but untracked
+    repo.s("mkdir vendor")
+    repo.w("vendor/go.mod", "module local")
+
+    repo.s(f"git edit {target}", check_error="untracked files would be overwritten")
+
+    # the file is untouched, and so is the branch
+    assert repo.sha("HEAD") == head
+    assert (repo / "vendor/go.mod").read_text() == "module local\n"
+    assert repo.so("git status --porcelain") == "?? vendor/"

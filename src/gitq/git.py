@@ -409,8 +409,35 @@ class Git:
         if orphan:
             cmd = ["git", "checkout", "--orphan", branch]
         else:
+            self.check_untracked_in_the_way(branch)
             cmd = ["git", "checkout", branch]
         self.cmd(cmd, comment=comment)
+
+    def untracked_in_the_way(self, ref: str) -> List[str]:
+        """
+        Untracked files that checking out `ref` would overwrite.
+
+        Only a path `ref` adds can collide, because anything already in HEAD is
+        tracked and so is not untracked by definition.  That makes this a tree
+        diff and a handful of stat calls, rather than a walk of the worktree.
+        """
+        if self.on_orphan_branch():
+            return []
+        # the trailing "--" keeps a ref that is also a filename from being ambiguous
+        cmd = ["git", "diff", "--name-only", "--no-renames", "--diff-filter=A", "HEAD", ref, "--"]
+        added = self.cmd(cmd, quiet=True).splitlines()
+        return [path for path in added if (self.directory / path).exists()]
+
+    def check_untracked_in_the_way(self, ref: str) -> None:
+        "Say which untracked files block a checkout, rather than letting git fail."
+        if not (blocked := self.untracked_in_the_way(ref)):
+            return
+        raise UserError(
+            f"Cannot check out {self.abbrev_if_sha(ref)}: "
+            "these untracked files would be overwritten:\n"
+            + "".join(f"\t{path}\n" for path in blocked)
+            + "Move or remove them, then try again."
+        )
 
     @property
     def continuation(self) -> Path:
