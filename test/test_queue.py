@@ -471,3 +471,22 @@ def test_queue_defer_pins_the_tree_on_a_later_rebase(repo: Git):
     # bookkeeping; the pinned tree carried everything else through untouched
     assert repo.so(f"git diff --name-only {before} HEAD") == ".git-queue"
     assert repo.qf.baselines[0].sha == repo.sha(":/upstream2")
+
+
+def test_continue_after_a_reset_during_a_conflict(repo: Git):
+    """
+    `git reset` clears the cherry-pick state along with the index, leaving
+    nothing to say the commit was ever being applied.  Continuing from there
+    used to drop it without a word.
+    """
+    conflicting_queue(repo)
+    before = repo.log()
+
+    repo.s("git queue rebase; [[ $? = 2 ]]")
+    repo.s("git reset -q --hard")
+
+    repo.s("git queue continue", check_error="was never applied")
+
+    # the rebase rolled back rather than losing a patch
+    assert repo.log() == before
+    assert not repo.so("git status --porcelain")

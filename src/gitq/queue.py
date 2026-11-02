@@ -30,7 +30,8 @@ from .continuations import (
     carry_tree_forward,
     is_defer,
     check_unstaged,
-    finish_cherry_pick,
+    finish_conflicted_pick,
+    head_before_pick,
 )
 from .port import port_user_merge
 from .yaml import YAMLObject, BaseLoader
@@ -746,6 +747,7 @@ class QueueCherryPickContinue(Continuation):
 
     ref: Sha
     bare: Branch | None
+    head: Sha | None = field(default=None)
 
     @contextmanager
     def impl(self) -> Iterator:
@@ -778,12 +780,7 @@ class QueueCherryPickContinue(Continuation):
         except (Exception, Resume):
             self.git.cherry_pick_abort()
             raise
-        if self.git.cherry_pick_in_progress:
-            if self.git.has_unmerged_files():
-                Output.print("The index still has unmerged files.")
-                raise Suspend(status="Resolve the conflicts.")
-            check_unstaged(self.git)
-            finish_cherry_pick(self.git)
+        finish_conflicted_pick(self.ref, self.head, git=self.git)
 
 
 @dataclass
@@ -812,7 +809,8 @@ class QueuePickCherries(Continuation):
                     )
                 except GitFailed:
                     if self.edit and self.git.cherry_pick_in_progress:
-                        with QueueCherryPickContinue(ref=cherry, bare=self.bare):
+                        head = head_before_pick(self.git)
+                        with QueueCherryPickContinue(ref=cherry, bare=self.bare, head=head):
                             raise Suspend(status="Resolve the conflicts.")
                     else:
                         self.git.cherry_pick_abort()

@@ -565,6 +565,41 @@ def check_unstaged(git: Git) -> None:
         )
 
 
+def head_before_pick(git: Git) -> Sha | None:
+    "The commit a cherry-pick is about to land on, if HEAD is born yet."
+    return None if git.on_orphan_branch() else git.sha("HEAD")
+
+
+def finish_conflicted_pick(ref: Sha, head: Sha | None, *, git: Git) -> None:
+    """
+    Pick up after the user has resolved a conflict.
+
+    If they ran `git cherry-pick --continue` themselves there is nothing left
+    to do but check they left the tree clean, and if they didn't, do it here.
+
+    But `git reset` clears the cherry-pick state along with the index, so a
+    reset part way through a resolution leaves nothing to say the commit was
+    ever being applied.  Carrying on from there would quietly drop it, so
+    compare HEAD against where it was when we suspended.
+    """
+    if git.cherry_pick_in_progress:
+        if git.has_unmerged_files():
+            Output.print("The index still has unmerged files.")
+            raise Suspend(status="Resolve the conflicts.")
+        check_unstaged(git)
+        finish_cherry_pick(git)
+        return
+    if head is not None and git.sha("HEAD") == head:
+        raise UserError(
+            f"Cannot continue: {git.commit(ref).summary}\n"
+            "was never applied, and git is no longer cherry-picking it --\n"
+            "`git reset` clears that state along with the index.\n"
+            "Continuing from here would quietly drop the commit, so abort the\n"
+            "operation, or skip this commit, and start over."
+        )
+    check_unstaged(git)
+
+
 def finish_cherry_pick(git: Git) -> None:
     """
     Finish a conflicted cherry-pick.
@@ -589,6 +624,7 @@ class CherryPickContinue(Continuation):
     """
 
     ref: Sha
+    head: Sha | None = field(default=None)
 
     @contextmanager
     def impl(self) -> Iterator[None]:
@@ -605,12 +641,7 @@ class CherryPickContinue(Continuation):
         except (Exception, Resume):
             self.git.cherry_pick_abort()
             raise
-        if self.git.cherry_pick_in_progress:
-            if self.git.has_unmerged_files():
-                Output.print("The index still has unmerged files.")
-                raise Suspend(status="Resolve the conflicts.")
-            check_unstaged(self.git)
-            finish_cherry_pick(self.git)
+        finish_conflicted_pick(self.ref, self.head, git=self.git)
 
 
 def cherry_pick(cherry: Commit, *, edit: bool = False, git: Git) -> None:
@@ -623,7 +654,7 @@ def cherry_pick(cherry: Commit, *, edit: bool = False, git: Git) -> None:
             )
         except GitFailed:
             if edit and git.cherry_pick_in_progress:
-                with CherryPickContinue(ref=cherry.sha):
+                with CherryPickContinue(ref=cherry.sha, head=head_before_pick(git)):
                     raise Suspend(status="Resolve the conflicts.")
             else:
                 git.cherry_pick_abort()
